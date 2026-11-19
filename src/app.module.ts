@@ -5,9 +5,18 @@ import { DatabaseModule } from './database/database.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DepartmentsModule } from './departments/departments.module.js';
 import { EmployeesModule } from './employees/employees.module.js';
+import { AttendanceModule } from './attendance/index.js';
+import { DashboardModule } from './dashboard/index.js';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, DepartmentsModule, EmployeesModule],
+  imports: [
+    DatabaseModule,
+    AuthModule,
+    DepartmentsModule,
+    EmployeesModule,
+    AttendanceModule,
+    DashboardModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
