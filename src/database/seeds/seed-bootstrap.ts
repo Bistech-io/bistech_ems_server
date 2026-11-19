@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { PrismaClient, PermissionScope } from '@prisma/client';
+import { PrismaClient, PermissionScope, EmploymentType, EmploymentStatus, HistoryEventType } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as argon2 from 'argon2';
@@ -146,12 +146,17 @@ async function seed() {
   console.log('Seeding default organization (bistech)...');
   const org = await prisma.organization.upsert({
     where: { slug: 'bistech' },
-    update: { name: 'BisTech' },
+    update: {
+      name: 'BisTech',
+      employeeCodePrefix: 'BST',
+      lastEmployeeNumber: 1003,
+    },
     create: {
       name: 'BisTech',
       slug: 'bistech',
       timezone: 'Asia/Dhaka',
       employeeCodePrefix: 'BST',
+      lastEmployeeNumber: 1003,
       settings: {
         workStart: '10:00',
         graceMinutes: 15,
@@ -163,7 +168,7 @@ async function seed() {
 
   // 3. Seed System Roles & Role Permissions
   console.log('Seeding system roles & role permissions...');
-  let superAdminRoleId = '';
+  const roleMap = new Map<string, string>();
   for (const roleDef of ROLE_DEFINITIONS) {
     const role = await prisma.role.upsert({
       where: {
@@ -181,9 +186,7 @@ async function seed() {
       },
     });
 
-    if (roleDef.name === 'super_admin') {
-      superAdminRoleId = role.id;
-    }
+    roleMap.set(roleDef.name, role.id);
 
     for (const p of roleDef.permissions) {
       const permId = permMap.get(p.key);
@@ -205,12 +208,119 @@ async function seed() {
     }
   }
 
-  // 4. Seed Super Admin User
-  console.log('Seeding super admin user (admin / Password123!)...');
-  const passwordHash = await argon2.hash('Password123!', {
+  // 4. Seed Departments
+  console.log('Seeding departments...');
+  const deptEngineering = await prisma.department.upsert({
+    where: {
+      organizationId_name: {
+        organizationId: org.id,
+        name: 'Engineering',
+      },
+    },
+    update: { description: 'Software Engineering and Product Development' },
+    create: {
+      organizationId: org.id,
+      name: 'Engineering',
+      description: 'Software Engineering and Product Development',
+    },
+  });
+
+  const deptHR = await prisma.department.upsert({
+    where: {
+      organizationId_name: {
+        organizationId: org.id,
+        name: 'Human Resources',
+      },
+    },
+    update: { description: 'People Operations, Talent, and Culture' },
+    create: {
+      organizationId: org.id,
+      name: 'Human Resources',
+      description: 'People Operations, Talent, and Culture',
+    },
+  });
+
+  const deptManagement = await prisma.department.upsert({
+    where: {
+      organizationId_name: {
+        organizationId: org.id,
+        name: 'Management',
+      },
+    },
+    update: { description: 'Executive and Operations Leadership' },
+    create: {
+      organizationId: org.id,
+      name: 'Management',
+      description: 'Executive and Operations Leadership',
+    },
+  });
+
+  // 5. Seed Designations
+  console.log('Seeding designations...');
+  const desigHRManager = await prisma.designation.upsert({
+    where: {
+      organizationId_title: {
+        organizationId: org.id,
+        title: 'HR Manager',
+      },
+    },
+    update: {},
+    create: {
+      organizationId: org.id,
+      title: 'HR Manager',
+    },
+  });
+
+  const desigLeadEng = await prisma.designation.upsert({
+    where: {
+      organizationId_title: {
+        organizationId: org.id,
+        title: 'Lead Engineer',
+      },
+    },
+    update: {},
+    create: {
+      organizationId: org.id,
+      title: 'Lead Engineer',
+    },
+  });
+
+  const desigSoftwareEng = await prisma.designation.upsert({
+    where: {
+      organizationId_title: {
+        organizationId: org.id,
+        title: 'Software Engineer',
+      },
+    },
+    update: {},
+    create: {
+      organizationId: org.id,
+      title: 'Software Engineer',
+    },
+  });
+
+  const desigExecutive = await prisma.designation.upsert({
+    where: {
+      organizationId_title: {
+        organizationId: org.id,
+        title: 'Executive',
+      },
+    },
+    update: {},
+    create: {
+      organizationId: org.id,
+      title: 'Executive',
+    },
+  });
+
+  const defaultPasswordHash = await argon2.hash('Password123!', {
     type: argon2.argon2id,
   });
 
+  // 6. Seed Accounts & Employees
+  console.log('Seeding the 4 primary accounts and employees...');
+
+  // 6.1 Super Admin (`admin` / `Password123!`)
   const adminUser = await prisma.user.upsert({
     where: {
       organizationId_username: {
@@ -221,7 +331,7 @@ async function seed() {
     update: {
       email: 'admin@bistech.io',
       displayName: 'BisTech Admin',
-      passwordHash,
+      passwordHash: defaultPasswordHash,
       accountStatus: 'active',
       failedLoginCount: 0,
       lockedUntil: null,
@@ -231,8 +341,291 @@ async function seed() {
       username: 'admin',
       email: 'admin@bistech.io',
       displayName: 'BisTech Admin',
-      passwordHash,
+      passwordHash: defaultPasswordHash,
       accountStatus: 'active',
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: adminUser.id,
+        roleId: roleMap.get('super_admin')!,
+      },
+    },
+    update: {
+      organizationId: org.id,
+      assignedBy: adminUser.id,
+    },
+    create: {
+      organizationId: org.id,
+      userId: adminUser.id,
+      roleId: roleMap.get('super_admin')!,
+      assignedBy: adminUser.id,
+    },
+  });
+
+  // 6.2 HR Manager (`hr` / `Password123!`) -> BST-1001
+  const hrUser = await prisma.user.upsert({
+    where: {
+      organizationId_username: {
+        organizationId: org.id,
+        username: 'hr',
+      },
+    },
+    update: {
+      email: 'hr@bistech.io',
+      displayName: 'Nadia Rahman',
+      passwordHash: defaultPasswordHash,
+      accountStatus: 'active',
+      failedLoginCount: 0,
+      lockedUntil: null,
+    },
+    create: {
+      organizationId: org.id,
+      username: 'hr',
+      email: 'hr@bistech.io',
+      displayName: 'Nadia Rahman',
+      passwordHash: defaultPasswordHash,
+      accountStatus: 'active',
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: hrUser.id,
+        roleId: roleMap.get('hr_manager')!,
+      },
+    },
+    update: {
+      organizationId: org.id,
+      assignedBy: adminUser.id,
+    },
+    create: {
+      organizationId: org.id,
+      userId: hrUser.id,
+      roleId: roleMap.get('hr_manager')!,
+      assignedBy: adminUser.id,
+    },
+  });
+
+  const hrEmployee = await prisma.employee.upsert({
+    where: { userId: hrUser.id },
+    update: {
+      employeeCode: 'BST-1001',
+      firstName: 'Nadia',
+      lastName: 'Rahman',
+      workEmail: 'hr@bistech.io',
+      phone: '+8801711000001',
+      departmentId: deptHR.id,
+      designationId: desigHRManager.id,
+      employmentType: EmploymentType.full_time,
+      employmentStatus: EmploymentStatus.active,
+      joiningDate: new Date('2024-01-15'),
+    },
+    create: {
+      organizationId: org.id,
+      userId: hrUser.id,
+      employeeCode: 'BST-1001',
+      firstName: 'Nadia',
+      lastName: 'Rahman',
+      workEmail: 'hr@bistech.io',
+      phone: '+8801711000001',
+      departmentId: deptHR.id,
+      designationId: desigHRManager.id,
+      employmentType: EmploymentType.full_time,
+      employmentStatus: EmploymentStatus.active,
+      joiningDate: new Date('2024-01-15'),
+    },
+  });
+
+  await prisma.employeeProfile.upsert({
+    where: { employeeId: hrEmployee.id },
+    update: { city: 'Dhaka', countryCode: 'BD' },
+    create: {
+      organizationId: org.id,
+      employeeId: hrEmployee.id,
+      city: 'Dhaka',
+      countryCode: 'BD',
+    },
+  });
+
+  // 6.3 Department Head (`head` / `Password123!`) -> BST-1002
+  const headUser = await prisma.user.upsert({
+    where: {
+      organizationId_username: {
+        organizationId: org.id,
+        username: 'head',
+      },
+    },
+    update: {
+      email: 'head@bistech.io',
+      displayName: 'Farhan Ahmed',
+      passwordHash: defaultPasswordHash,
+      accountStatus: 'active',
+      failedLoginCount: 0,
+      lockedUntil: null,
+    },
+    create: {
+      organizationId: org.id,
+      username: 'head',
+      email: 'head@bistech.io',
+      displayName: 'Farhan Ahmed',
+      passwordHash: defaultPasswordHash,
+      accountStatus: 'active',
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: headUser.id,
+        roleId: roleMap.get('dept_head')!,
+      },
+    },
+    update: {
+      organizationId: org.id,
+      assignedBy: adminUser.id,
+    },
+    create: {
+      organizationId: org.id,
+      userId: headUser.id,
+      roleId: roleMap.get('dept_head')!,
+      assignedBy: adminUser.id,
+    },
+  });
+
+  const headEmployee = await prisma.employee.upsert({
+    where: { userId: headUser.id },
+    update: {
+      employeeCode: 'BST-1002',
+      firstName: 'Farhan',
+      lastName: 'Ahmed',
+      workEmail: 'head@bistech.io',
+      phone: '+8801711000002',
+      departmentId: deptEngineering.id,
+      designationId: desigLeadEng.id,
+      employmentType: EmploymentType.full_time,
+      employmentStatus: EmploymentStatus.active,
+      joiningDate: new Date('2024-02-01'),
+    },
+    create: {
+      organizationId: org.id,
+      userId: headUser.id,
+      employeeCode: 'BST-1002',
+      firstName: 'Farhan',
+      lastName: 'Ahmed',
+      workEmail: 'head@bistech.io',
+      phone: '+8801711000002',
+      departmentId: deptEngineering.id,
+      designationId: desigLeadEng.id,
+      employmentType: EmploymentType.full_time,
+      employmentStatus: EmploymentStatus.active,
+      joiningDate: new Date('2024-02-01'),
+    },
+  });
+
+  await prisma.employeeProfile.upsert({
+    where: { employeeId: headEmployee.id },
+    update: { city: 'Dhaka', countryCode: 'BD' },
+    create: {
+      organizationId: org.id,
+      employeeId: headEmployee.id,
+      city: 'Dhaka',
+      countryCode: 'BD',
+    },
+  });
+
+  // Assign Farhan Ahmed as Department Head of Engineering
+  await prisma.department.update({
+    where: { id: deptEngineering.id },
+    data: { headEmployeeId: headEmployee.id },
+  });
+
+  // 6.4 Standard Employee (`employee` / `Password123!`) -> BST-1003
+  const standardUser = await prisma.user.upsert({
+    where: {
+      organizationId_username: {
+        organizationId: org.id,
+        username: 'employee',
+      },
+    },
+    update: {
+      email: 'employee@bistech.io',
+      displayName: 'Mehedi Alam',
+      passwordHash: defaultPasswordHash,
+      accountStatus: 'active',
+      failedLoginCount: 0,
+      lockedUntil: null,
+    },
+    create: {
+      organizationId: org.id,
+      username: 'employee',
+      email: 'employee@bistech.io',
+      displayName: 'Mehedi Alam',
+      passwordHash: defaultPasswordHash,
+      accountStatus: 'active',
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: standardUser.id,
+        roleId: roleMap.get('employee')!,
+      },
+    },
+    update: {
+      organizationId: org.id,
+      assignedBy: adminUser.id,
+    },
+    create: {
+      organizationId: org.id,
+      userId: standardUser.id,
+      roleId: roleMap.get('employee')!,
+      assignedBy: adminUser.id,
+    },
+  });
+
+  const standardEmployee = await prisma.employee.upsert({
+    where: { userId: standardUser.id },
+    update: {
+      employeeCode: 'BST-1003',
+      firstName: 'Mehedi',
+      lastName: 'Alam',
+      workEmail: 'employee@bistech.io',
+      phone: '+8801711000003',
+      departmentId: deptEngineering.id,
+      designationId: desigSoftwareEng.id,
+      employmentType: EmploymentType.full_time,
+      employmentStatus: EmploymentStatus.active,
+      joiningDate: new Date('2024-03-01'),
+    },
+    create: {
+      organizationId: org.id,
+      userId: standardUser.id,
+      employeeCode: 'BST-1003',
+      firstName: 'Mehedi',
+      lastName: 'Alam',
+      workEmail: 'employee@bistech.io',
+      phone: '+8801711000003',
+      departmentId: deptEngineering.id,
+      designationId: desigSoftwareEng.id,
+      employmentType: EmploymentType.full_time,
+      employmentStatus: EmploymentStatus.active,
+      joiningDate: new Date('2024-03-01'),
+    },
+  });
+
+  await prisma.employeeProfile.upsert({
+    where: { employeeId: standardEmployee.id },
+    update: { city: 'Dhaka', countryCode: 'BD' },
+    create: {
+      organizationId: org.id,
+      employeeId: standardEmployee.id,
+      city: 'Dhaka',
+      countryCode: 'BD',
     },
   });
 
@@ -247,7 +640,7 @@ async function seed() {
     update: {
       email: 'locked@bistech.io',
       displayName: 'Locked User',
-      passwordHash,
+      passwordHash: defaultPasswordHash,
       accountStatus: 'active',
       failedLoginCount: 5,
       lockedUntil: new Date(Date.now() + 60 * 60 * 1000),
@@ -257,38 +650,22 @@ async function seed() {
       username: 'locked',
       email: 'locked@bistech.io',
       displayName: 'Locked User',
-      passwordHash,
+      passwordHash: defaultPasswordHash,
       accountStatus: 'active',
       failedLoginCount: 5,
       lockedUntil: new Date(Date.now() + 60 * 60 * 1000),
     },
   });
 
-  // 5. Assign super_admin role to admin user
-  await prisma.userRole.upsert({
-    where: {
-      userId_roleId: {
-        userId: adminUser.id,
-        roleId: superAdminRoleId,
-      },
-    },
-    update: {
-      organizationId: org.id,
-      assignedBy: adminUser.id,
-    },
-    create: {
-      organizationId: org.id,
-      userId: adminUser.id,
-      roleId: superAdminRoleId,
-      assignedBy: adminUser.id,
-    },
-  });
-
   console.log('Bootstrap seed completed successfully!');
   console.log({
     organization: org.slug,
-    user: adminUser.username,
-    role: 'super_admin',
+    accounts: [
+      { role: 'super_admin', username: 'admin', employeeCode: null },
+      { role: 'hr_manager', username: 'hr', employeeCode: 'BST-1001' },
+      { role: 'dept_head', username: 'head', employeeCode: 'BST-1002' },
+      { role: 'employee', username: 'employee', employeeCode: 'BST-1003' },
+    ],
   });
 }
 
