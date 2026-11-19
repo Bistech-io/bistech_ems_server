@@ -40,3 +40,4 @@ export const createEmployeeSchema = z
   .strict();
 
 export type CreateEmployeeDto = z.infer<typeof createEmployeeSchema>;
+

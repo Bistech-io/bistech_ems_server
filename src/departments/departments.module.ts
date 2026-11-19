@@ -11,3 +11,4 @@ import { DepartmentsController } from './departments.controller.js';
   exports: [DepartmentsService],
 })
 export class DepartmentsModule {}
+
