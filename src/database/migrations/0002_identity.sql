@@ -18,6 +18,7 @@ CREATE TABLE organizations (
 CREATE TABLE users (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id    uuid NOT NULL REFERENCES organizations (id),
+  username           text NOT NULL CHECK (char_length(username) BETWEEN 1 AND 60),
   email              text NOT NULL CHECK (char_length(email) BETWEEN 3 AND 254),
   display_name       text NOT NULL CHECK (char_length(display_name) BETWEEN 1 AND 160),
   password_hash      text,
@@ -33,6 +34,7 @@ CREATE TABLE users (
   CONSTRAINT users_active_requires_hash CHECK (account_status <> 'active' OR password_hash IS NOT NULL)
 );
 CREATE UNIQUE INDEX users_org_email_key ON users (organization_id, lower(email));
+CREATE UNIQUE INDEX users_org_username_key ON users (organization_id, lower(username));
 
 CREATE TABLE roles (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
