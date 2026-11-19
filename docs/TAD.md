@@ -26,8 +26,9 @@ Choices marked **(final)** were open or optional in 1.0 and are now decided. Ver
 | Frontend | Next.js (App Router) + TypeScript | Presentation and forms only; client validation is usability, not security |
 | UI components | shadcn/ui (Radix UI + Tailwind CSS) | Components copied into `apps/web/src/components/ui`; accessible base for WCAG 2.1 AA |
 | Icons | lucide-react | Import icons individually |
-| Fonts | Google Sans via `next/font` | Verify web licence; fallback DM Sans or Figtree via `next/font/google` |
-| Theme | next-themes, `defaultTheme="dark"`, class strategy, shadcn CSS variables | Light theme + toggle optional later |
+| Animation / Motion | framer-motion **(final)** | Simple, lightweight, eye-pleasing transitions and micro-interactions suitable for an office environment (never heavy or distracting; respects `prefers-reduced-motion`) |
+| Fonts | Space Grotesk (headings, `-0.02em`) & Inter (body) via `next/font/google` | Official brand typography defined in `docs/ui/Bistech_brand_theme.md` |
+| Theme & UI Design | next-themes (`defaultTheme="dark"`), official BisTech palette (`docs/ui/Bistech_brand_theme.md`), UI mocks (`docs/ui/mock/`) | Deep dark mode (`#0B0F0E`, `#131A17`) with Sea Green (`#2E8B57`, `#4CAF7D`, `#1F5C3A`) accents; HTML mocks in `docs/ui/mock/` serve as visual/layout inspiration |
 | Forms | react-hook-form + `@hookform/resolvers/zod` **(final)** | Uses schemas from `packages/contracts` |
 | Client data | TanStack Query **(final)** | Cache, retries, 30 to 60 s notification polling. Server Components fetch initial page data through a server-only API helper that forwards cookies |
 | Tables | TanStack Table inside a shadcn `DataTable` wrapper **(final)** | Server-side pagination and sort only |
@@ -37,7 +38,7 @@ Choices marked **(final)** were open or optional in 1.0 and are now decided. Ver
 | Database | PostgreSQL 15+ (dev compose uses a current major) | SQL migrations are source of truth |
 | DB access | **Prisma ORM** (`@prisma/client`) with typed models, managed via `PrismaService` inside `DatabaseModule` **(final)** | Type-safe query building, migrations, and relationship navigation across all 28 domain models |
 | Migrations | **Prisma Migrate** (`prisma/schema.prisma` and `prisma migrate`) alongside plain SQL custom triggers & security grants **(final)** | Managed migration workflows; custom triggers (append-only, updated_at) and roles applied via migration scripts |
-| Transactions | `TransactionService` on AsyncLocalStorage (e.g. nestjs-cls) | Repositories join the active transaction automatically |
+| Transactions | `@nestjs-cls/transactional` with `@nestjs-cls/transactional-adapter-prisma` **(final)** | Repositories automatically join active `PrismaService.$transaction()` blocks via AsyncLocalStorage without passing `tx` manually |
 | Passwords/tokens | Argon2id (`argon2`), JWT via `jose`, opaque refresh tokens, OTP via HMAC-SHA256 | See SAD.md |
 | Queue | pg-boss in `QueueModule` | Same DB and backup; no Redis. Its `pgboss` schema is installed by the migrator step, API and worker start with `migrate: false` |
 | Email | Nodemailer + Gmail in `EmailModule` (worker), called by pg-boss jobs | Never inside a DB transaction. A local SMTP catcher (Mailpit) is used in dev only |
@@ -53,17 +54,19 @@ Choices marked **(final)** were open or optional in 1.0 and are now decided. Ver
 **Caveat**: nestjs-zod, nestjs-cls, nestjs-pino, @sentry/nestjs, and Prisma ORM are intended choices, not verified for mutual compatibility. Pin and verify versions in M0. Keep first-party `@nestjs/*` packages on one version line.
 
 ## 3. Frontend stack summary
-Next.js App Router + TS; Tailwind + shadcn/ui (Radix); lucide-react; Google Sans (or fallback) via next/font; next-themes dark by default; Zod schemas from `packages/contracts`; react-hook-form; TanStack Query/Table; Playwright + axe.
+Next.js App Router + TS; Tailwind + shadcn/ui (Radix); `framer-motion`; lucide-react; Space Grotesk & Inter via `next/font/google`; next-themes dark by default (`docs/ui/Bistech_brand_theme.md` + `docs/ui/mock/` inspiration); Zod schemas from `packages/contracts`; react-hook-form; TanStack Query/Table; Playwright + axe.
 
 Frontend rules (apply to every UI ticket):
-1. Server Components by default; `'use client'` only on interactive leaves (forms, tables with state, the notification bell, theme toggle).
+1. Server Components by default; `'use client'` only on interactive leaves (forms, tables with state, the notification bell, theme toggle, animated motion leaves).
 2. The browser talks to one origin. `next.config.ts` rewrites `/api/*` to the API (`API_INTERNAL_URL`). No CORS needed.
 3. No token in `localStorage`, `sessionStorage`, URLs or JS-readable cookies. Auth cookies are HttpOnly and set by the API. The CSRF token comes from `GET /auth/me` (and login/refresh responses) and is held **in memory only** by `lib/api/csrf.ts`.
 4. All HTTP goes through `lib/api/client.ts` (browser) or `lib/api/server.ts` (server, forwards the incoming cookies). Neither is bypassed with raw `fetch`. The client attaches `X-CSRF-Token`, does single-flight refresh on `TOKEN_EXPIRED`, and branches on `error.code`, never on message text.
 5. Navigation and action visibility come from `GET /auth/me` permissions through `lib/auth/permissions.ts` (`can(permission, minScope?)`). The server still enforces everything.
 6. A route-protection file (`middleware.ts`; named `proxy.ts` in newer Next.js majors, verify in F-007) only redirects unauthenticated visitors to `/login` and sets the CSP nonce. It is a UX convenience, not authorization.
 7. Every form uses a contracts schema with `zodResolver`; server `details[].field` errors are mapped back onto fields.
-8. Dark mode is the baseline; every new screen is checked with axe in dark mode.
+8. Dark mode is the baseline; every new screen is checked with axe in dark mode and strictly follows `docs/ui/Bistech_brand_theme.md`.
+9. **UI Inspiration (`docs/ui/mock/`)**: When creating any new UI screen or component, use the reference HTML mockups in `docs/ui/mock/` (e.g. `overview-dashboard.html`, `attendance_dashboard.html`) as layout, structural, and visual inspiration.
+10. **Motion & Animation (`framer-motion`)**: Use `framer-motion` for UI transitions and micro-interactions. Keep animations very simple, subtle, fast, and eye-pleasing—never heavy, slow, or distracting for an office environment, and always respect `prefers-reduced-motion`.
 
 ## 4. Repository layout
 
@@ -114,6 +117,9 @@ One NestJS codebase, two entry points (`main.ts` API, `worker.ts` worker). Globa
 
 ```
 apps/api/
+├── prisma/
+│   ├── schema.prisma                    all 28 models, relations, enums (section 7.4)
+│   └── migrations/                      Prisma Migrate history + appended custom SQL
 ├── src/
 │   ├── main.ts                          HTTP bootstrap: Helmet, cookie-parser, body limit, global prefix,
 │   │                                    enableShutdownHooks, Swagger (non-production only)
@@ -184,20 +190,10 @@ apps/api/
 │   │   └── index.ts
 │   │
 │   ├── database/
-│   │   ├── database.module.ts           PrismaService provider, global
+│   │   ├── database.module.ts           PrismaService provider, ClsModule with Prisma adapter, global
 │   │   ├── prisma.service.ts            extends PrismaClient ($connect, $disconnect)
-│   │   ├── transaction.service.ts       runs interactive transactions ($transaction)
-│   │   ├── errors.ts                    maps Prisma/PG error codes (P2002, P2003, etc.) to domain errors
-│   │   ├── migrations/
-│   │   │   ├── 0001_functions.sql
-│   │   │   ├── 0002_identity.sql
-│   │   │   ├── 0003_org_employees.sql
-│   │   │   ├── 0004_attendance.sql
-│   │   │   ├── 0005_teams_tasks.sql
-│   │   │   ├── 0006_feedback_platform_audit.sql
-│   │   │   ├── 0007_triggers.sql
-│   │   │   ├── 0008_functions.sql
-│   │   │   └── 0009_grants.sql
+│   │   ├── transaction.service.ts       runs interactive transactions via @nestjs-cls/transactional
+│   │   ├── errors.ts                    maps Prisma (P2002, P2003, P2025) and PG (23514, 42501) error codes to domain errors
 │   │   └── seeds/
 │   │       ├── permissions.generated.sql    GENERATED from packages/contracts (32 rows)
 │   │       ├── seed-system-roles.ts         seedSystemRoles(tx, orgId): 4 roles + role_permissions, idempotent
@@ -251,11 +247,9 @@ apps/api/
 │
 ├── test/                                (expanded in 4.2.3)
 ├── scripts/
-│   ├── migrate.ts                       apply SQL migrations (checksum table, advisory lock)
 │   ├── migrate-pgboss.ts                install/upgrade the pgboss schema as ems_migrator
 │   ├── gen-permissions-sql.ts           contracts -> seeds/permissions.generated.sql
 │   ├── check-permissions-sync.ts        CI: DB permissions == contracts definition
-│   ├── gen-db-types.ts                  kysely-codegen wrapper
 │   └── print-routes.ts                  dumps the Nest route table (used by the route scan)
 ├── .env.example
 ├── .env.test.example
@@ -625,10 +619,11 @@ infra/
     └── smoke-test.sh                       /health, login probe on staging
 
 docs/
-├── adr/            0001-modular-monolith.md  0002-nestjs-express.md  0003-kysely-and-sql-migrations.md
+├── adr/            0001-modular-monolith.md  0002-nestjs-express.md  0003-prisma-and-sql-migrations.md
 ├── runbooks/       deploy.md  rollback.md  restore-drill.md  on-call.md  incident-and-breach.md  gmail-sending.md
 ├── erd/            ems-erd.mmd  ems-erd.svg  (regenerated from final DDL, section 7.8)
 ├── security/       asvs-l2-review.md  checklist-S01-S39.md
+├── ui/             Bistech_brand_theme.md  mock/ (overview-dashboard.html, attendance_dashboard.html)
 └── perf/           results-<commit>.md
 
 .github/
@@ -660,7 +655,7 @@ tests/perf/
 | Imports | `@/` alias to `src/` inside an app; `@ems/contracts` for shared code; no `../../..` chains; barrel files only at a module's `index.ts` |
 | Tests | `*.spec.ts` next to the unit; integration, API, authorization and workflow tests under `apps/api/test`; Playwright under `apps/web/e2e` |
 | Commits / branches | Conventional Commits (`feat(tasks): ...`), branch `F-041-task-creation`; one ticket per PR |
-| Generated files | `db.types.ts`, `permissions.generated.sql`, ERD: committed, marked generated, CI fails if stale |
+| Generated files | `permissions.generated.sql` and ERD: committed, marked generated, CI fails if stale. Prisma Client is generated via `prisma generate` during build/postinstall and not committed |
 
 ## 5. Modules and ownership
 
@@ -728,26 +723,31 @@ Fail-closed: a route with neither `@RequirePermission()` nor `@Public()` is deni
 | Role | Purpose | Rights |
 |---|---|---|
 | admin / superuser | one-time bootstrap per environment | runs `infra/db/bootstrap-roles.sql` |
-| `ems_migrator` | owns the schema and objects; used only by the migration step (`scripts/migrate.ts`, `scripts/migrate-pgboss.ts`) | DDL; never used by API or worker |
+| `ems_migrator` | owns the schema and objects; used only by the migration step (`prisma migrate deploy`, `scripts/migrate-pgboss.ts`) | DDL; never used by API or worker |
 | `ems_app` | runtime role for API and worker | no DDL; `SELECT/INSERT/UPDATE` on business tables; **`INSERT + SELECT` only** on the five append-only tables; `DELETE` only on `user_sessions`, `auth_tokens`, `otp_challenges`, `notifications`, `idempotency_keys` (cleanup jobs), `user_roles` (role replacement) and `holidays` (FSD `DELETE /holidays/{id}`); `SELECT` only on `permissions`; role-level `statement_timeout = 10s` and `idle_in_transaction_session_timeout = 30s` |
 
 `ems_app` also needs `USAGE` and DML on the `pgboss` schema, granted by `migrate-pgboss.ts` after it installs pg-boss as `ems_migrator`. API and worker start pg-boss with `migrate: false`.
 
 Role-level settings (`ALTER ROLE ... SET`) live in the bootstrap script, not in migrations, because a migration role cannot alter another role without `ADMIN` on it (found while testing the DDL).
 
-### 7.3 Migration files
+### 7.3 Migration files & Prisma Migrate workflow
 
-Applied in order by `scripts/migrate.ts` (records filename + SHA-256 in `schema_migrations`, takes a `pg_advisory_lock`, refuses to run a changed already-applied file). Future changes are new numbered files, written expand-then-contract so the previous app version keeps working during deploy.
+All 28 domain tables, composite uniqueness constraints, relationships, and enums are modeled in `apps/api/prisma/schema.prisma` (using `@@map` and `@map` for snake_case DB tables and columns).
 
-| File | Contents |
+1. **Baseline generation**: The initial schema migration is generated with `npx prisma migrate dev --name init --create-only`.
+2. **Custom SQL append**: Custom PostgreSQL functions (`0001_functions.sql`, `0008_functions.sql`), table-level `CHECK` constraints, partial unique indexes, append-only and `updated_at` triggers (`0007_triggers.sql`), and least-privilege security grants (`0009_grants.sql`) are appended directly into the generated `migration.sql` file.
+3. **Execution**: Migrations are applied in deployment pipelines via `npx prisma migrate deploy` under the `ems_migrator` role. Future changes follow the same create-only -> append -> deploy cycle (expand-then-contract).
+
+| Component | Contents |
 |---|---|
-| `0001_functions.sql` | `set_updated_at()`, `block_mutation()` |
+| `prisma/schema.prisma` | Core DDL for 28 tables, composite unique keys, enums, foreign keys |
+| `0001_functions.sql` | `set_updated_at()`, `block_mutation()` trigger functions |
 | `0002_identity.sql` | organizations, users, roles, permissions, role_permissions, user_roles, user_sessions, auth_tokens, otp_challenges |
 | `0003_org_employees.sql` | departments, designations, holidays, employees, `departments.head_employee_id` FK, employee_profiles, employee_employment_history |
 | `0004_attendance.sql` | attendance_records, attendance_corrections |
 | `0005_teams_tasks.sql` | teams, team_members (+ department trigger), tasks, task_assignments, task_submissions, task_comments, task_status_events |
 | `0006_feedback_platform_audit.sql` | feedback_items, notifications, audit_logs, idempotency_keys |
-| `0007_triggers.sql` | `updated_at` triggers; append-only triggers |
+| `0007_triggers.sql` | `updated_at` triggers; append-only triggers on 5 immutable tables |
 | `0008_functions.sql` | `managed_employee_ids()` |
 | `0009_grants.sql` | least-privilege grants for `ems_app` |
 
@@ -1510,14 +1510,14 @@ Each row needs an automated test in `apps/api/test/db/`. The "Run" column record
 | Inactive employee requires `exit_date >= joining_date` | CHECK | not yet |
 | Department head must be an employee of the same organization | Composite FK | not yet |
 | Cancelled task has `cancelled_at` | CHECK | not yet |
-| Migration runner rejects an edited, already-applied file | Checksum | not yet |
+| Prisma Migrate rejects edited, already-applied migrations (checksum drift) | Checksum / Prisma Migrate | not yet |
 
 Rules enforced only in the service layer (and tested there): head-of-department checks, scope checks, self-modification bans, state-transition validity, the last Super Admin rule, "reviewer must be in the task's review scope".
 
-M0 exit (F-002) requires: all migrations apply to an empty database, all rows above have a committed passing test, seed creates exactly 32 permissions and 4 system roles, and `db.types.ts` and the ERD are regenerated from the final DDL.
+M0 exit (F-002) requires: all migrations apply to an empty database via `prisma migrate deploy`, all rows above have a committed passing test, seed creates exactly 32 permissions and 4 system roles, and Prisma Client and the ERD are regenerated from the final schema.
 
 ## 8. Transactions
-`TransactionService.run(async () => {...})` per workflow. Repositories use the active connection automatically (Prisma transaction client resolved from AsyncLocalStorage / PrismaService). No network call (email) while a transaction is open. `TransactionService` is the only place that checks out a connection for a unit of work. Concurrency controls per workflow are in FSD.md section 10 and mirrored by the constraints in section 7.
+Transactions are managed via `@nestjs-cls/transactional` and `@nestjs-cls/transactional-adapter-prisma` using `TransactionService` (or `@Transactional()` decorators). Repositories automatically use the active `PrismaService` transactional client resolved from `AsyncLocalStorage` without passing `tx` manually. Multi-step operations run inside one `transactionService.run(async () => {...})` block. Audit rows are written in the same transaction; no network call (email) while a transaction is open. `TransactionService` is the only place that checks out a connection for a unit of work. Concurrency controls per workflow are in FSD.md section 10 and mirrored by the constraints in section 7.
 
 ## 9. Background jobs (pg-boss)
 Default: up to 5 attempts, exponential backoff from 30 s, failed state raises alert, idempotent handlers, singleton keys. Handlers are registered only by `WorkerModule`; the API only enqueues, and only after commit.
@@ -1543,7 +1543,7 @@ No job writes attendance rows.
 - Backend and worker: persistent Node container with private networking (`node dist/main.js`, `node dist/worker.js`) from one image (`infra/docker/Dockerfile.api`). No serverless.
 - Database: managed PostgreSQL, daily base backups + WAL archiving (RPO 15 min, RTO 4 h).
 - Edge: CDN/WAF for TLS and DDoS; web app proxies `/api/*` so the browser sees one origin; API global prefix `api/v1`.
-- Deploy order: build images -> run `scripts/migrate.ts` and `scripts/migrate-pgboss.ts` as `ems_migrator` on a direct connection -> start the new worker -> start the new API -> smoke test (`infra/scripts/smoke-test.sh`). Migrations are backward compatible with the previous app version so rollback is an image swap.
+- Deploy order: build images -> run `prisma migrate deploy` and `tsx scripts/migrate-pgboss.ts` as `ems_migrator` on a direct connection -> start the new worker -> start the new API -> smoke test (`infra/scripts/smoke-test.sh`). Migrations are backward compatible with the previous app version so rollback is an image swap.
 - Object storage: none. Cache: none at launch (optional in-process cache, 60 s TTL, for settings/holidays/designations).
 - Pooling: 10 to 20 connections per API instance, 5 for worker, under ~70% of `max_connections`.
 - Environments: development, staging, production, each with its own DB and secrets (host secret manager). Variables are listed in section 18.
@@ -1590,7 +1590,7 @@ Tests override the email provider and clock with fakes. Fixtures: two organizati
 CI pipeline: lint, type-check, boundary lint, route-table scan, tests, dependency audit, secret scan, migration check (including generated-file freshness), deploy. Workflow definitions are in section 17.6.
 
 ## 16. Known gaps
-- The DDL (section 7) exists and was applied once to PostgreSQL 16, but the committed constraint-test suite, `db.types.ts` generation, the migration runner and the permissions generator do not exist yet. M0 (F-002) is not done until they pass in CI.
+- The DDL (section 7) exists and was applied once to PostgreSQL 16, but the committed constraint-test suite, `prisma/schema.prisma` baseline, Prisma Migrate custom SQL append, and the permissions generator do not exist yet. M0 (F-002) is not done until they pass in CI.
 - `seedSystemRoles` and `managed_employee_ids` usage in repositories are specified, not implemented. No load test exists yet.
 - ERD must be regenerated from the final DDL (the mermaid in 7.8 is its text source).
 - Package compatibility (nestjs-zod, nestjs-cls, nestjs-pino, @sentry/nestjs, Prisma ORM, Next.js and Tailwind majors) is unverified; versions are chosen in F-001.
@@ -1712,7 +1712,7 @@ export default tseslint.config(
       'ems/no-string-sql': 'error',   // blocks template/concat strings passed to raw query helpers
     },
   },
-  { ignores: ['**/dist/**', '**/.next/**', '**/db.types.ts', '**/*.generated.*'] },
+  { ignores: ['**/dist/**', '**/.next/**', '**/generated/**', '**/*.generated.*'] },
 );
 ```
 *verify*: the exact `boundaries/element-types` and `entry-point` option shapes differ between plugin majors; F-001 includes a failing-import fixture that proves the rule fires.
@@ -1736,9 +1736,9 @@ trim_trailing_whitespace = true
 indent_size = 2
 ```
 
-**`.gitignore`** (essentials): `node_modules/`, `dist/`, `.next/`, `.turbo/`, `coverage/`, `playwright-report/`, `test-results/`, `.env`, `.env.*` (except `*.example`), `*.pem`, `*.key`, `.DS_Store`. `db.types.ts` and `permissions.generated.sql` are **committed**.
+**`.gitignore`** (essentials): `node_modules/`, `dist/`, `.next/`, `.turbo/`, `coverage/`, `playwright-report/`, `test-results/`, `.env`, `.env.*` (except `*.example`), `*.pem`, `*.key`, `.DS_Store`. `permissions.generated.sql` is **committed**.
 
-**`.gitattributes`**: `* text=auto eol=lf`, `package-lock.json -diff`, `*.generated.* linguist-generated`, `db.types.ts linguist-generated`.
+**`.gitattributes`**: `* text=auto eol=lf`, `package-lock.json -diff`, `*.generated.* linguist-generated`.
 
 **`.npmrc`**: `engine-strict=true`, `save-exact=true`, `audit-level=high`, `fund=false`.
 
@@ -1815,11 +1815,10 @@ volumes:
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:integration": "jest -c jest.integration.config.ts --runInBand",
-    "migrate": "tsx scripts/migrate.ts && tsx scripts/migrate-pgboss.ts",
+    "migrate": "prisma migrate deploy && tsx scripts/migrate-pgboss.ts",
     "seed:bootstrap": "tsx src/database/seeds/seed-bootstrap.ts",
     "seed:dev": "tsx src/database/seeds/seed-dev-fixtures.ts",
-    "gen": "npm run gen:db-types && npm run gen:permissions",
-    "gen:db-types": "tsx scripts/gen-db-types.ts",
+    "gen": "prisma generate && npm run gen:permissions",
     "gen:permissions": "tsx scripts/gen-permissions-sql.ts",
     "check:permissions": "tsx scripts/check-permissions-sync.ts",
     "routes": "tsx scripts/print-routes.ts"
@@ -1864,7 +1863,7 @@ export default {
   testRegex: 'src/.*\\.spec\\.ts$',
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.module.ts', '!src/database/db.types.ts'],
+  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.module.ts', '!**/generated/**'],
   testEnvironment: 'node',
 };
 ```
@@ -1993,6 +1992,7 @@ FROM base AS build
 COPY --from=prune /repo/out/json/ .
 RUN npm ci
 COPY --from=prune /repo/out/full/ .
+RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
 RUN npx turbo run build --filter=@ems/api...
 RUN npm prune --omit=dev
 
@@ -2002,6 +2002,7 @@ WORKDIR /repo
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build --chown=app:app /repo/node_modules ./node_modules
 COPY --from=build --chown=app:app /repo/apps/api/dist ./apps/api/dist
+COPY --from=build --chown=app:app /repo/apps/api/prisma ./apps/api/prisma
 COPY --from=build --chown=app:app /repo/apps/api/package.json ./apps/api/package.json
 COPY --from=build --chown=app:app /repo/packages/contracts/dist ./packages/contracts/dist
 COPY --from=build --chown=app:app /repo/packages/contracts/package.json ./packages/contracts/package.json
@@ -2021,7 +2022,7 @@ Migrations are not part of the runtime CMD. A separate CI/deploy job runs `npm r
 | File | Trigger | Jobs |
 |---|---|---|
 | `ci.yml` | pull request, push to main | checkout; setup Node from `.nvmrc` with npm cache; `npm ci`; `lint`; `typecheck`; boundary lint (part of lint); `format:check`; unit tests; integration tests with a PostgreSQL service container (roles bootstrapped, migrations applied); route-table scan (T-14); `npm audit --audit-level=high` (fails on critical); gitleaks; `gen` then `git diff --exit-code` (generated files fresh); build |
-| `migration-check.yml` | PR touching `apps/api/src/database/**` or `infra/db/**` | start PostgreSQL; run bootstrap; `npm run migrate` on empty DB; run `test/db` constraint tests; check applied-file checksums unchanged vs main; (optional) migration lint for destructive statements |
+| `migration-check.yml` | PR touching `apps/api/prisma/**` or `infra/db/**` | start PostgreSQL; run bootstrap; `npm run migrate` on empty DB; run `test/db` constraint tests; check applied-file checksums unchanged vs main; (optional) migration lint for destructive statements |
 | `e2e-nightly.yml` | nightly, pre-release | build and start api + web + postgres + mailpit; seed; Playwright with axe in dark mode; upload report |
 | `security.yml` | manual, pre-release | ZAP baseline against staging with `.zap/rules.tsv` |
 | `deploy-staging.yml` | push to main | build api/web images; run migrate step; deploy worker, api, web; smoke test |

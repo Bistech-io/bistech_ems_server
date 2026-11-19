@@ -131,16 +131,16 @@ Report: files changed, tests added, assumptions taken (with Q-id)
 ### F-002 Database schema, constraints and seed
 **Priority:** P0 | **Depends on:** F-001
 **Checklist**
-- [ ] SQL migrations for all 28 tables (FSD.md section 8)
-- [ ] Composite tenant FKs `(organization_id, x_id)`
-- [ ] CHECKs, partial unique indexes, triggers (`updated_at`, append-only `audit_logs` and `task_status_events`, team-member department check)
-- [ ] Grants: app role INSERT+SELECT only on `audit_logs` and `task_status_events`; no DDL rights; separate migration role
+- [ ] Prisma schema (`apps/api/prisma/schema.prisma`) modeling all 28 tables, relationships, and composite unique keys
+- [ ] Baseline migration generated via Prisma Migrate (`prisma migrate dev --create-only`)
+- [ ] Custom SQL appended to migration: composite tenant FKs `(organization_id, x_id)`, CHECKs, partial unique indexes, functions (`set_updated_at`, `block_mutation`, `managed_employee_ids`), triggers (`updated_at`, append-only on audit/history, team-member department check)
+- [ ] Grants: app role `ems_app` INSERT+SELECT only on `audit_logs` and `task_status_events`; no DDL rights; separate migration role `ems_migrator`
 - [ ] High-priority indexes (FSD.md section 9)
 - [ ] `seed_system_roles(org)` generating 32 permissions and 4 roles from the definition in `packages/contracts`
 - [ ] `managed_employee_ids(org, head_employee_id)` function
-- [ ] Regenerate ERD from final DDL
+- [ ] Regenerate ERD from final schema
 **Acceptance criteria**
-- Migration applies to an empty database.
+- Prisma migration applies cleanly to an empty database via `prisma migrate deploy`.
 - Every rule in TAD.md/FSD.md "rules the database enforces" has a passing constraint test (cross-tenant FK insert fails, second pending submission fails, reviewer = submitter fails, UPDATE/DELETE/TRUNCATE on audit tables fails for the app role, etc.).
 - Seed creates exactly 32 permissions and 4 system roles.
 **Tests:** T-20 (DB part), T-32 (DB part)
@@ -165,13 +165,13 @@ Report: files changed, tests added, assumptions taken (with Q-id)
 ### F-004 Database module and TransactionService
 **Priority:** P0 | **Depends on:** F-002, F-003
 **Checklist**
-- [ ] `DatabaseModule` with explicit pool limits (API 10 to 20, worker 5)
-- [ ] `TransactionService.run()` on AsyncLocalStorage
-- [ ] Repositories join the active transaction automatically
+- [ ] `DatabaseModule` with `PrismaService` extending `PrismaClient` with connection lifecycle
+- [ ] `@nestjs-cls/transactional` with `@nestjs-cls/transactional-adapter-prisma`
+- [ ] Repositories join active `PrismaService.$transaction()` automatically via AsyncLocalStorage
 - [ ] Statement timeout 10 s; request timeout 30 s
 - [ ] Reference module (e.g. holidays) end to end as the template for others
 **Acceptance criteria**
-- Integration test: nested repository calls share one connection; a thrown error rolls back all rows.
+- Integration test: nested repository calls share one connection/transaction; a thrown error rolls back all rows.
 - Reference module reviewed and approved by all three developers.
 
 ### F-005 Observability and health
