@@ -9,4 +9,9 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  @Get('health/db')
+  async checkDb() {
+    return this.appService.checkDatabase();
+  }
 }
