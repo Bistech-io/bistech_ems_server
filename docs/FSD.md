@@ -16,7 +16,7 @@ Effective access, Employee role included. Scopes: Own, Team, Dept, Managed, Org.
 | user.manage | Org | - | - | - |
 | role.manage | Org | - | - | - |
 | audit.read | Org | - | - | - |
-| org.settings.manage | Org | - | - | - |
+| org.settings.manage | Org | Org | - | - |
 | employee.read | Org | Org | Managed | Own |
 | employee.read.sensitive | Org | Org | - | Own |
 | employee.create | Org | Org | - | - |
@@ -228,7 +228,26 @@ No `DELETE /employees/{id}`.
 | PATCH, DELETE | /designations/{id} | manage (DELETE archives) |
 | GET, POST | /holidays | read / manage (filter year) |
 | DELETE | /holidays/{id} | manage |
+| GET | /organization/settings | Authenticated (Super Admin, HR Manager, Dept Head, Employee): read workStart, graceMinutes, workEnd, weekendDays, timezone |
+| PATCH | /organization/settings | org.settings.manage (Super Admin, HR Manager): dynamically update workStart, graceMinutes, workEnd, weekendDays |
 | GET, PATCH | /organization | org.settings.manage (name, timezone, work start, grace, work end, weekend days, employee code prefix) |
+
+#### Organization Work Schedule & Shift Settings (`/organization/settings`)
+- **GET `/organization/settings`**:
+  - **Permission**: Any authenticated session.
+  - **Returns**: `{ workStart: string, graceMinutes: number, workEnd: string, weekendDays: number[], timezone: string, name: string }`.
+- **PATCH `/organization/settings`**:
+  - **Permission**: `org.settings.manage` (granted to Super Admin and HR Manager).
+  - **Payload**:
+    - `workStart` (optional): `HH:mm` format (`^([01]\\d|2[0-3]):[0-5]\\d$`), e.g. `"09:00"`.
+    - `graceMinutes` (optional): integer `0` to `120`, e.g. `15`.
+    - `workEnd` (optional): `HH:mm` format (`^([01]\\d|2[0-3]):[0-5]\\d$`), must be after `workStart`, e.g. `"18:00"`.
+    - `weekendDays` (optional): array of ISO weekdays `1` (Monday) to `7` (Sunday), unique, non-empty, e.g. `[5, 6]`.
+  - **Validation & Business Rules**:
+    - `workStart` must be strictly before `workEnd`.
+    - Updates are persisted into `organizations.settings` JSONB under tenant isolation.
+    - An audit entry is recorded in `audit_logs` (`action: "organization.settings.updated"`, `entityType: "organization"`).
+
 
 ### Users, roles, audit (Super Admin)
 | Method | Endpoint | Perm | Notes |
