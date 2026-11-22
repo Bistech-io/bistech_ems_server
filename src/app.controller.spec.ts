@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
+import { AppService, LOGO } from './app.service.js';
 
 describe('AppController', () => {
   let appController: AppController;
@@ -15,8 +15,11 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('should return the BisTech EMS welcome banner', () => {
+      const response = appController.getHello();
+      expect(response).toContain(LOGO);
+      expect(response).toContain('BisTech.io  ::  Employee Management System (EMS)');
+      expect(response).toContain('[ OK ]  Server is up and running');
     });
   });
 });
