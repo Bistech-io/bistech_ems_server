@@ -68,6 +68,7 @@ const ROLE_DEFINITIONS = [
       { key: 'employee.history.read', scope: PermissionScope.org },
       { key: 'org.structure.read', scope: PermissionScope.org },
       { key: 'org.structure.manage', scope: PermissionScope.org },
+      { key: 'org.settings.manage', scope: PermissionScope.org },
       { key: 'department.head.assign', scope: PermissionScope.org },
       { key: 'attendance.self', scope: PermissionScope.own },
       { key: 'attendance.read', scope: PermissionScope.org },
