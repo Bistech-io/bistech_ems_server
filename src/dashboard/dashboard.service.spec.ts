@@ -1,5 +1,6 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
+import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import type { DashboardRepository } from './dashboard.repository.js';
 import { DashboardService } from './dashboard.service.js';
 
@@ -43,6 +44,21 @@ function createMockRepo(overrides: Partial<DashboardRepository> = {}): Dashboard
     findTaskAssignments: vi.fn().mockResolvedValue([]),
     countOpenFeedbackByUser: vi.fn().mockResolvedValue(1),
     findRecentNotifications: vi.fn().mockResolvedValue([]),
+    findOrganizationConfig: vi.fn().mockResolvedValue({
+      timezone: 'Asia/Dhaka',
+      settings: {
+        workStart: '09:00',
+        graceMinutes: 15,
+        workEnd: '18:00',
+        weekendDays: [5, 6],
+      },
+    }),
+    findOrgDepartments: vi.fn().mockResolvedValue([{ id: 'dept-1', name: 'Engineering' }]),
+    findOrgEmployeesForHrDashboard: vi.fn().mockResolvedValue([]),
+    findOrgAttendanceInRange: vi.fn().mockResolvedValue([]),
+    findOrgTaskAssignments: vi.fn().mockResolvedValue([]),
+    countOrgOpenFeedback: vi.fn().mockResolvedValue(3),
+    findRecentOrgAuditLogs: vi.fn().mockResolvedValue([]),
     ...overrides,
   } as unknown as DashboardRepository;
 }
@@ -69,5 +85,39 @@ describe('DashboardService', () => {
     await expect(
       service.getMyOverviewDashboard(ORG_ID, USER_ID),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('returns HR overview dashboard for HR manager', async () => {
+    const repo = createMockRepo();
+    const service = new DashboardService(repo);
+    const hrCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-hr',
+      roles: ['hr_manager'],
+    };
+
+    const hrDashboard = await service.getHrOverviewDashboard(
+      hrCaller,
+      new Date('2026-11-18T04:00:00Z'),
+    );
+
+    expect(hrDashboard.openFeedbackCount).toBe(3);
+    expect(hrDashboard.workforce.departmentSummary).toHaveLength(1);
+  });
+
+  it('throws 403 FORBIDDEN when non-HR employee requests HR overview dashboard', async () => {
+    const repo = createMockRepo();
+    const service = new DashboardService(repo);
+    const empCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-emp',
+      roles: ['employee'],
+    };
+
+    await expect(service.getHrOverviewDashboard(empCaller)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });

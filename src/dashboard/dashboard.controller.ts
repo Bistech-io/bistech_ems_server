@@ -23,4 +23,16 @@ export class DashboardController {
       meta: null,
     };
   }
+
+  @Get('hr')
+  async getHrDashboard(@Req() req: Request) {
+    const data = await this.dashboardService.getHrOverviewDashboard(req.user!);
+
+    return {
+      success: true,
+      message: 'HR overview dashboard retrieved',
+      data,
+      meta: null,
+    };
+  }
 }

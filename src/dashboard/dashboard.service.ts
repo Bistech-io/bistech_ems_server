@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import {
   getMonthStartIso,
   getOrgZonedParts,
@@ -6,7 +7,9 @@ import {
 } from '../attendance/absence.query.js';
 import { DashboardRepository } from './dashboard.repository.js';
 import type { EmployeeDashboardResponseDto } from './dto/employee-dashboard.response.dto.js';
+import type { HrDashboardResponseDto } from './dto/hr-dashboard.response.dto.js';
 import { computeEmployeeDashboardMetrics } from './metrics/employee.metrics.js';
+import { computeHrDashboardMetrics } from './metrics/hr.metrics.js';
 
 @Injectable()
 export class DashboardService {
@@ -62,6 +65,67 @@ export class DashboardService {
       taskAssignments,
       openFeedbackCount,
       notifications,
+    });
+  }
+
+  async getHrOverviewDashboard(
+    caller: AuthenticatedUser,
+    now: Date = new Date(),
+  ): Promise<HrDashboardResponseDto> {
+    const isHrOrAdmin =
+      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+
+    if (!isHrOrAdmin) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only HR Managers or Super Admins can access the HR overview dashboard',
+      });
+    }
+
+    const org = await this.dashboardRepo.findOrganizationConfig(caller.organizationId);
+    if (!org) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Organization not found',
+      });
+    }
+
+    const { dateStr: todayDateStr } = getOrgZonedParts(now, org.timezone);
+    const monthStart = getMonthStartIso(todayDateStr);
+
+    const [
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      openFeedbackCount,
+      auditLogs,
+    ] = await Promise.all([
+      this.dashboardRepo.findOrgDepartments(caller.organizationId),
+      this.dashboardRepo.findOrgEmployeesForHrDashboard(caller.organizationId),
+      this.dashboardRepo.findHolidayDates(caller.organizationId, monthStart, todayDateStr),
+      this.dashboardRepo.findOrgAttendanceInRange(
+        caller.organizationId,
+        monthStart,
+        todayDateStr,
+      ),
+      this.dashboardRepo.findOrgTaskAssignments(caller.organizationId),
+      this.dashboardRepo.countOrgOpenFeedback(caller.organizationId),
+      this.dashboardRepo.findRecentOrgAuditLogs(caller.organizationId),
+    ]);
+
+    return computeHrDashboardMetrics({
+      now,
+      timezone: org.timezone,
+      settings: org.settings,
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      openFeedbackCount,
+      auditLogs,
     });
   }
 }
