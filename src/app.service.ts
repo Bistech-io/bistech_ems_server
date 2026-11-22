@@ -1,12 +1,56 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from './database/prisma.service.js';
 
+export const LOGO = String.raw`
+██████████████████████████████
+ ██████████████████████████████████
+   ██████████████████████████████████
+    ███████████████████████████████████
+      ███████████████████   ███████████
+                              █████████
+ ███████████████████████       ████████
+   ███████████████████         ███████
+     ██████████████████████████████
+     █████████████████████████████████
+    ████████████████████████████████████
+  ██████████████████████████████████████
+██████████████                 █████████
+████████████                    ████████
+██████████                     █████████
+████████    ████████████████████████████
+██████    ██████████████████████████████
+████    ████████████████████████████████
+██    ███████████████████████████████
+█   ████████████████████████████
+`;
+
+export function buildBanner(version = '1.0.0'): string {
+  const line = '─'.repeat(54);
+  return `${LOGO}
+  ┌${line}┐
+  │  BisTech.io  ::  Employee Management System (EMS)    │
+  └${line}┘
+
+  [ OK ]  Server is up and running
+  [ OK ]  API status ........ healthy
+  [ OK ]  Version ........... v${version}
+  [ OK ]  Time .............. ${new Date().toISOString()}
+
+  $ about --bistech
+  > BisTech builds software for businesses.
+  > This API powers the EMS: employees, attendance & more.
+  > Website: https://bistech.io
+
+  $ _
+`;
+}
+
 @Injectable()
 export class AppService {
   constructor(@Optional() private readonly prisma?: PrismaService) {}
 
   getHello(): string {
-    return 'Hello World!';
+    return buildBanner();
   }
 
   async checkDatabase(): Promise<{ status: string; database: string; user: string }> {
