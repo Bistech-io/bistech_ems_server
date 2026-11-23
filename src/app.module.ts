@@ -10,6 +10,7 @@ import { DashboardModule } from './dashboard/index.js';
 import { OrganizationModule } from './organization/organization.module.js';
 import { UsersModule } from './users/index.js';
 import { TasksModule } from './tasks/index.js';
+import { TeamsModule } from './teams/index.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { TasksModule } from './tasks/index.js';
     OrganizationModule,
     UsersModule,
     TasksModule,
+    TeamsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
