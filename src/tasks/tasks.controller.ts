@@ -22,6 +22,11 @@ import {
   listTasksQuerySchema,
   updateTaskSchema,
 } from './dto/task.dto.js';
+import {
+  departmentBoardQuerySchema,
+  myTasksQuerySchema,
+  teamBoardQuerySchema,
+} from './dto/task-board.dto.js';
 import { TasksService } from './tasks.service.js';
 
 const uuidParamSchema = z.string().uuid('id must be a valid UUID');
@@ -98,6 +103,87 @@ export class TasksController {
       message: 'Tasks retrieved',
       data: items,
       meta,
+    };
+  }
+
+  @Get('me')
+  async getMyTasks(@Req() req: Request, @Query() rawQuery: Record<string, unknown>) {
+    const parseResult = myTasksQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const { items, meta } = await this.tasksService.getMyTasks(
+      req.user!,
+      parseResult.data,
+    );
+
+    return {
+      success: true,
+      message: 'My task assignments retrieved',
+      data: items,
+      meta,
+    };
+  }
+
+  @Get('board/department')
+  async getDepartmentBoard(
+    @Req() req: Request,
+    @Query() rawQuery: Record<string, unknown>,
+  ) {
+    const parseResult = departmentBoardQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.tasksService.getDepartmentBoard(
+      req.user!,
+      parseResult.data,
+    );
+
+    return {
+      success: true,
+      message: 'Department task board retrieved',
+      data,
+      meta: null,
+    };
+  }
+
+  @Get('board/team')
+  async getTeamBoard(@Req() req: Request, @Query() rawQuery: Record<string, unknown>) {
+    const parseResult = teamBoardQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.tasksService.getTeamBoard(req.user!, parseResult.data);
+
+    return {
+      success: true,
+      message: 'Team task board retrieved',
+      data,
+      meta: null,
     };
   }
 

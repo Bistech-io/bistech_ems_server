@@ -395,4 +395,111 @@ describe('TasksService', () => {
       ),
     ).rejects.toThrow();
   });
+
+  it('returns own task assignments with latest review status for GET /tasks/me', async () => {
+    const prisma = {
+      taskAssignment: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'asg-1',
+            status: 'changes_requested',
+            startedAt: new Date('2026-11-20T09:00:00Z'),
+            submittedAt: new Date('2026-11-21T10:00:00Z'),
+            completedAt: null,
+            task: {
+              id: TASK_ID,
+              title: 'Build task board UI',
+              description: 'Implement board columns',
+              priority: 'high',
+              dueDate: new Date('2026-11-25T00:00:00Z'),
+              assignmentType: 'individual',
+              requiresReview: true,
+              department: { id: DEPT_ID, name: 'Engineering' },
+              team: null,
+            },
+            submissions: [
+              {
+                version: 1,
+                reviewStatus: 'changes_requested',
+                submittedAt: new Date('2026-11-21T10:00:00Z'),
+                reviewedAt: new Date('2026-11-21T12:00:00Z'),
+                reviewNote: 'Add loading skeleton',
+              },
+            ],
+          },
+        ]),
+      },
+    } as unknown as PrismaService;
+    const repo = {
+      findCallerEmployeeContext: vi.fn().mockResolvedValue({
+        employeeId: EMP_ID,
+        departmentId: DEPT_ID,
+        isActive: true,
+        headedDepartmentIds: [],
+      }),
+    } as unknown as TasksRepository;
+
+    const service = new TasksService(prisma, repo);
+    const res = await service.getMyTasks(EMPLOYEE_CALLER, { page: 1, limit: 20 });
+
+    expect(res.meta.total).toBe(1);
+    expect(res.items[0]).toMatchObject({
+      assignmentId: 'asg-1',
+      status: 'changes_requested',
+      task: { id: TASK_ID, title: 'Build task board UI' },
+      latestReview: {
+        version: 1,
+        reviewStatus: 'changes_requested',
+        reviewNote: 'Add loading skeleton',
+      },
+    });
+  });
+
+  it('returns reduced department board cards for own department and 404 for another department (T-47)', async () => {
+    const prisma = {
+      task: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: TASK_ID,
+            title: 'API audit',
+            dueDate: new Date('2026-11-26T00:00:00Z'),
+            assignments: [
+              {
+                status: 'in_progress',
+                employee: { firstName: 'Nadia', lastName: 'Rahman' },
+              },
+            ],
+          },
+        ]),
+      },
+    } as unknown as PrismaService;
+    const repo = {
+      findCallerEmployeeContext: vi.fn().mockResolvedValue({
+        employeeId: EMP_ID,
+        departmentId: DEPT_ID,
+        isActive: true,
+        headedDepartmentIds: [],
+      }),
+    } as unknown as TasksRepository;
+
+    const service = new TasksService(prisma, repo);
+    const cards = await service.getDepartmentBoard(EMPLOYEE_CALLER, {});
+
+    expect(cards).toEqual([
+      {
+        id: TASK_ID,
+        title: 'API audit',
+        status: 'in_progress',
+        dueDate: '2026-11-26',
+        assignees: ['Nadia Rahman'],
+      },
+    ]);
+
+    await expect(
+      service.getDepartmentBoard(EMPLOYEE_CALLER, {
+        departmentId: '99999999-9999-9999-9999-999999999999',
+      }),
+    ).rejects.toThrow();
+  });
 });

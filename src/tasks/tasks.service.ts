@@ -14,6 +14,11 @@ import type {
   ListTasksQueryDto,
   UpdateTaskDto,
 } from './dto/task.dto.js';
+import type {
+  DepartmentBoardQueryDto,
+  MyTasksQueryDto,
+  TeamBoardQueryDto,
+} from './dto/task-board.dto.js';
 import { TasksRepository } from './tasks.repository.js';
 
 @Injectable()
@@ -678,5 +683,261 @@ export class TasksService {
         cancelledAssignmentsCount: openAssignments.length,
       };
     });
+  }
+
+  async getMyTasks(caller: AuthenticatedUser, query: MyTasksQueryDto) {
+    const orgId = caller.organizationId;
+    const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
+
+    if (!callerCtx.employeeId) {
+      return {
+        items: [],
+        meta: { page: query.page, limit: query.limit, total: 0, totalPages: 0 },
+      };
+    }
+
+    const where: Record<string, unknown> = {
+      organizationId: orgId,
+      employeeId: callerCtx.employeeId,
+      ...(query.status ? { status: query.status } : { status: { not: 'cancelled' } }),
+      task: {
+        status: 'active',
+        ...(query.priority ? { priority: query.priority } : {}),
+      },
+    };
+
+    const skip = (query.page - 1) * query.limit;
+
+    const [total, assignments] = await Promise.all([
+      this.prisma.taskAssignment.count({ where }),
+      this.prisma.taskAssignment.findMany({
+        where,
+        skip,
+        take: query.limit,
+        orderBy: [{ task: { dueDate: 'asc' } }, { createdAt: 'desc' }],
+        include: {
+          task: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              priority: true,
+              dueDate: true,
+              assignmentType: true,
+              requiresReview: true,
+              department: { select: { id: true, name: true } },
+              team: { select: { id: true, name: true } },
+            },
+          },
+          submissions: {
+            orderBy: { version: 'desc' },
+            take: 1,
+            select: {
+              version: true,
+              reviewStatus: true,
+              reviewedAt: true,
+              reviewNote: true,
+              submittedAt: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      items: assignments.map((a) => {
+        const latestSub = a.submissions[0] ?? null;
+        return {
+          assignmentId: a.id,
+          status: a.status,
+          startedAt: a.startedAt ? a.startedAt.toISOString() : null,
+          submittedAt: a.submittedAt ? a.submittedAt.toISOString() : null,
+          completedAt: a.completedAt ? a.completedAt.toISOString() : null,
+          task: {
+            id: a.task.id,
+            title: a.task.title,
+            description: a.task.description,
+            priority: a.task.priority,
+            dueDate: a.task.dueDate ? a.task.dueDate.toISOString().slice(0, 10) : null,
+            assignmentType: a.task.assignmentType,
+            requiresReview: a.task.requiresReview,
+            department: a.task.department,
+            team: a.task.team,
+          },
+          latestReview: latestSub
+            ? {
+                version: latestSub.version,
+                reviewStatus: latestSub.reviewStatus,
+                submittedAt: latestSub.submittedAt.toISOString(),
+                reviewedAt: latestSub.reviewedAt ? latestSub.reviewedAt.toISOString() : null,
+                reviewNote: latestSub.reviewNote,
+              }
+            : null,
+        };
+      }),
+      meta: {
+        page: query.page,
+        limit: query.limit,
+        total,
+        totalPages: Math.ceil(total / query.limit),
+      },
+    };
+  }
+
+  private mapReducedBoardCard(t: {
+    id: string;
+    title: string;
+    dueDate: Date | null;
+    assignments: {
+      status: string;
+      employee: { firstName: string; lastName: string };
+    }[];
+  }) {
+    const activeAssignments = t.assignments.filter((a) => a.status !== 'cancelled');
+    const allDone =
+      activeAssignments.length > 0 && activeAssignments.every((a) => a.status === 'done');
+    const anyInReview = activeAssignments.some((a) => a.status === 'in_review');
+    const anyInProgress = activeAssignments.some(
+      (a) => a.status === 'in_progress' || a.status === 'changes_requested',
+    );
+    const boardStatus = allDone
+      ? 'done'
+      : anyInReview
+        ? 'in_review'
+        : anyInProgress
+          ? 'in_progress'
+          : 'todo';
+
+    return {
+      id: t.id,
+      title: t.title,
+      status: boardStatus,
+      dueDate: t.dueDate ? t.dueDate.toISOString().slice(0, 10) : null,
+      assignees: activeAssignments.map((a) =>
+        `${a.employee.firstName} ${a.employee.lastName}`.trim(),
+      ),
+    };
+  }
+
+  async getDepartmentBoard(caller: AuthenticatedUser, query: DepartmentBoardQueryDto) {
+    const orgId = caller.organizationId;
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isDeptHead = caller.roles.includes('department_head');
+    const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
+
+    let targetDepartmentId: string | undefined = query.departmentId;
+
+    if (!isSuperAdmin) {
+      const allowedDeptIds = new Set<string>(
+        isDeptHead ? callerCtx.headedDepartmentIds : [],
+      );
+      if (callerCtx.departmentId) {
+        allowedDeptIds.add(callerCtx.departmentId);
+      }
+
+      if (targetDepartmentId) {
+        if (!allowedDeptIds.has(targetDepartmentId)) {
+          throw new NotFoundException({
+            code: 'NOT_FOUND',
+            message: 'Department board not found',
+          });
+        }
+      } else {
+        targetDepartmentId =
+          callerCtx.departmentId ?? callerCtx.headedDepartmentIds[0];
+        if (!targetDepartmentId) {
+          return [];
+        }
+      }
+    }
+
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        organizationId: orgId,
+        status: 'active',
+        ...(targetDepartmentId ? { departmentId: targetDepartmentId } : {}),
+      },
+      orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        title: true,
+        dueDate: true,
+        assignments: {
+          where: { status: { not: 'cancelled' } },
+          select: {
+            status: true,
+            employee: { select: { firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+
+    return tasks.map((t) => this.mapReducedBoardCard(t));
+  }
+
+  async getTeamBoard(caller: AuthenticatedUser, query: TeamBoardQueryDto) {
+    const orgId = caller.organizationId;
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isDeptHead = caller.roles.includes('department_head');
+    const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
+
+    const team = await this.prisma.team.findFirst({
+      where: {
+        organizationId: orgId,
+        id: query.teamId,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        departmentId: true,
+        members: {
+          where: { removedAt: null },
+          select: { employeeId: true },
+        },
+      },
+    });
+
+    if (!team) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Team board not found',
+      });
+    }
+
+    const isMember =
+      callerCtx.employeeId !== null &&
+      team.members.some((m) => m.employeeId === callerCtx.employeeId);
+    const isManagedHead =
+      isDeptHead && callerCtx.headedDepartmentIds.includes(team.departmentId);
+
+    if (!isSuperAdmin && !isManagedHead && !isMember) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Team board not found',
+      });
+    }
+
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        organizationId: orgId,
+        status: 'active',
+        teamId: team.id,
+      },
+      orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        title: true,
+        dueDate: true,
+        assignments: {
+          where: { status: { not: 'cancelled' } },
+          select: {
+            status: true,
+            employee: { select: { firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+
+    return tasks.map((t) => this.mapReducedBoardCard(t));
   }
 }
