@@ -9,6 +9,10 @@ import { DashboardRepository } from './dashboard.repository.js';
 import type { EmployeeDashboardResponseDto } from './dto/employee-dashboard.response.dto.js';
 import type { HrDashboardResponseDto } from './dto/hr-dashboard.response.dto.js';
 import type { CompanyDashboardResponseDto } from './dto/company-dashboard.response.dto.js';
+import type {
+  DashboardRoleView,
+  SummaryDashboardResponseDto,
+} from './dto/summary-dashboard.response.dto.js';
 import { computeCompanyDashboardMetrics } from './metrics/company.metrics.js';
 import { computeEmployeeDashboardMetrics } from './metrics/employee.metrics.js';
 import { computeHrDashboardMetrics } from './metrics/hr.metrics.js';
@@ -201,5 +205,84 @@ export class DashboardService {
       openIssuesCount: feedbackByKind.issues,
       openSuggestionsCount: feedbackByKind.suggestions,
     });
+  }
+
+  async getSummaryDashboard(
+    caller: AuthenticatedUser,
+    now: Date = new Date(),
+  ): Promise<SummaryDashboardResponseDto> {
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isHrManager = caller.roles.includes('hr_manager');
+    const isDeptHead = caller.roles.includes('department_head');
+
+    const primaryRole: SummaryDashboardResponseDto['primaryRole'] = isSuperAdmin
+      ? 'super_admin'
+      : isHrManager
+        ? 'hr_manager'
+        : isDeptHead
+          ? 'department_head'
+          : 'employee';
+
+    const availableViews: DashboardRoleView[] = [];
+    if (isSuperAdmin) availableViews.push('company', 'hr');
+    else if (isHrManager) availableViews.push('hr');
+    if (isDeptHead) availableViews.push('team');
+    availableViews.push('me');
+
+    const tryGetMe = async (): Promise<EmployeeDashboardResponseDto | null> => {
+      try {
+        return await this.getMyOverviewDashboard(
+          caller.organizationId,
+          caller.userId,
+          now,
+        );
+      } catch (err) {
+        if (err instanceof NotFoundException) {
+          return null;
+        }
+        throw err;
+      }
+    };
+
+    if (isSuperAdmin) {
+      const [company, me] = await Promise.all([
+        this.getCompanyDashboard(caller, now),
+        tryGetMe(),
+      ]);
+      return {
+        primaryRole,
+        availableViews,
+        company,
+        hr: null,
+        me,
+      };
+    }
+
+    if (isHrManager) {
+      const [hr, me] = await Promise.all([
+        this.getHrOverviewDashboard(caller, now),
+        tryGetMe(),
+      ]);
+      return {
+        primaryRole,
+        availableViews,
+        company: null,
+        hr,
+        me,
+      };
+    }
+
+    const me = await this.getMyOverviewDashboard(
+      caller.organizationId,
+      caller.userId,
+      now,
+    );
+    return {
+      primaryRole,
+      availableViews,
+      company: null,
+      hr: null,
+      me,
+    };
   }
 }
