@@ -1,9 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import cookieParser from 'cookie-parser';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { AuthGuard } from '../src/auth/auth.guard.js';
+import { AuthService } from '../src/auth/auth.service.js';
+import { AUTH_CONSTANTS } from '../src/auth/auth.constants.js';
 
 describe('Manage HR & Department Head Endpoints (e2e)', () => {
   let app: INestApplication;
@@ -34,6 +37,7 @@ describe('Manage HR & Department Head Endpoints (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.use(cookieParser());
     await app.init();
   });
 
@@ -190,6 +194,43 @@ describe('Manage HR & Department Head Endpoints (e2e)', () => {
         .put(`/users/${targetUserId}/roles`)
         .send({ roles: ['employee'] })
         .expect(200);
+    });
+  });
+
+  describe('POST /auth/reset-password', () => {
+    it('allows an authenticated user to reset their password on first login setup', async () => {
+      const authService = app.get(AuthService);
+      const token = await authService.signAccessToken({
+        sub: callerUserId,
+        orgId,
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['super_admin'],
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .set('Cookie', [`${AUTH_CONSTANTS.COOKIE_ACCESS_NAME}=${token}`])
+        .send({ newPassword: 'BrandNewSecurePass123!!' })
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toContain('Password reset successfully');
+
+      // Also verify Bearer token header works and reset password back to seed password
+      const revertRes = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ newPassword: 'Password123!' })
+        .expect(200);
+
+      expect(revertRes.body.success).toBe(true);
+    });
+
+    it('rejects unauthenticated request with missing reset token', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .send({ newPassword: 'BrandNewSecurePass123!!' })
+        .expect(401);
     });
   });
 });
