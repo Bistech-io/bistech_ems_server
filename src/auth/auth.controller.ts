@@ -15,6 +15,11 @@ import { AuthService } from './auth.service.js';
 import { AuthGuard } from './auth.guard.js';
 import { AUTH_CONSTANTS } from './auth.constants.js';
 import { loginSchema, LoginDto } from './dto/login.dto.js';
+import {
+  forgotPasswordSchema,
+  verifyOtpSchema,
+  resetPasswordSchema,
+} from './dto/reset-password.dto.js';
 
 @Controller('auth')
 export class AuthController {
@@ -153,6 +158,108 @@ export class AuthController {
       success: true,
       message: 'Session loaded',
       data: authMeData,
+      meta: null,
+    };
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async forgotPassword(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const parseResult = forgotPasswordSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+    const result = await this.authService.forgotPassword(parseResult.data, ip);
+
+    return {
+      success: true,
+      message: result.message,
+      data: null,
+      meta: null,
+    };
+  }
+
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const parseResult = verifyOtpSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const result = await this.authService.verifyOtp(parseResult.data);
+    const isProd = process.env.NODE_ENV === 'production';
+
+    res.cookie(AUTH_CONSTANTS.COOKIE_RESET_NAME, result.resetToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/api/v1/auth/reset-password',
+      maxAge: AUTH_CONSTANTS.COOKIE_RESET_MAX_AGE_MS,
+    });
+
+    return {
+      success: true,
+      message: 'OTP verified successfully',
+      data: {
+        resetToken: result.resetToken,
+      },
+      meta: null,
+    };
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const parseResult = resetPasswordSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const rawResetToken = req.cookies?.[AUTH_CONSTANTS.COOKIE_RESET_NAME];
+    const result = await this.authService.resetPassword(parseResult.data, rawResetToken);
+
+    res.clearCookie(AUTH_CONSTANTS.COOKIE_RESET_NAME, {
+      path: '/api/v1/auth/reset-password',
+    });
+
+    return {
+      success: true,
+      message: result.message,
+      data: null,
       meta: null,
     };
   }
