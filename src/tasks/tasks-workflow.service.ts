@@ -13,6 +13,7 @@ import type {
   CreateSubmissionDto,
   ListCommentsQueryDto,
   ListSubmissionsQueryDto,
+  RequestTaskReviewDto,
   ReviewSubmissionDto,
   UpdateAssignmentStatusDto,
 } from './dto/task-workflow.dto.js';
@@ -176,7 +177,16 @@ export class TasksWorkflowService {
         });
       }
 
-      assertManualStatusTransition(assignment.status, dto.status);
+      const isSuperAdmin = caller.roles.includes('super_admin');
+      if (!isSuperAdmin) {
+        if (dto.status !== 'todo' && dto.status !== 'in_progress') {
+          throw new ConflictException({
+            code: 'INVALID_TASK_TRANSITION',
+            message: `Cannot transition task assignment from ${assignment.status} to ${dto.status}`,
+          });
+        }
+        assertManualStatusTransition(assignment.status, dto.status);
+      }
 
       const now = new Date();
       const updated = await tx.taskAssignment.update({
@@ -189,6 +199,7 @@ export class TasksWorkflowService {
             dto.status === 'in_progress' && !assignment.startedAt
               ? now
               : assignment.startedAt,
+          completedAt: dto.status === 'done' ? now : assignment.completedAt,
         },
       });
 
@@ -831,6 +842,80 @@ export class TasksWorkflowService {
         body: comment.body,
         author: comment.author,
         createdAt: comment.createdAt.toISOString(),
+      };
+    });
+  }
+
+  async requestTaskReview(
+    taskId: string,
+    dto: RequestTaskReviewDto,
+    caller: AuthenticatedUser,
+  ) {
+    const task = await this.assertCanActOnTask(taskId, caller);
+    const orgId = caller.organizationId;
+
+    return this.prisma.$transaction(async (tx) => {
+      const recipientUserIds = new Set<string>();
+
+      if (dto.targetRole === 'assignee') {
+        if (dto.targetEmployeeId) {
+          const emp = await tx.employee.findFirst({
+            where: { organizationId: orgId, id: dto.targetEmployeeId },
+            select: { userId: true },
+          });
+          if (emp && emp.userId !== caller.userId) {
+            recipientUserIds.add(emp.userId);
+          }
+        } else {
+          for (const a of task.assignments) {
+            if (a.employee.userId !== caller.userId) {
+              recipientUserIds.add(a.employee.userId);
+            }
+          }
+        }
+      } else {
+        const dept = await tx.department.findFirst({
+          where: { organizationId: orgId, id: task.departmentId },
+          select: { headEmployee: { select: { userId: true } } },
+        });
+        if (dept?.headEmployee && dept.headEmployee.userId !== caller.userId) {
+          recipientUserIds.add(dept.headEmployee.userId);
+        }
+      }
+
+      if (recipientUserIds.size > 0) {
+        const nowKey = Date.now();
+        await tx.notification.createMany({
+          data: Array.from(recipientUserIds).map((uid) => ({
+            organizationId: orgId,
+            userId: uid,
+            type: 'task.review_requested',
+            title: `Review requested: ${task.title}`,
+            body: dto.note ?? 'Please review this task',
+            payload: { taskId: task.id, targetRole: dto.targetRole },
+            dedupeKey: `task.review_requested:${task.id}:${uid}:${nowKey}`,
+          })),
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          actorUserId: caller.userId,
+          action: 'task.review_requested',
+          entityType: 'task',
+          entityId: task.id,
+          metadata: {
+            targetRole: dto.targetRole,
+            notifiedCount: recipientUserIds.size,
+          },
+        },
+      });
+
+      return {
+        taskId: task.id,
+        targetRole: dto.targetRole,
+        notifiedCount: recipientUserIds.size,
       };
     });
   }
