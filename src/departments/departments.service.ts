@@ -1,5 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import { PrismaService } from '../database/prisma.service.js';
+import type { AssignDepartmentHeadDto } from './dto/assign-department-head.dto.js';
 
 @Injectable()
 export class DepartmentsService {
@@ -72,6 +79,193 @@ export class DepartmentsService {
       activeEmployeeCount: d._count.employees,
       createdAt: d.createdAt,
     }));
+  }
+
+  async assignDepartmentHead(
+    departmentId: string,
+    dto: AssignDepartmentHeadDto,
+    caller: AuthenticatedUser,
+  ) {
+    if (!caller.roles.includes('super_admin')) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only Super Admins can assign or remove a department head',
+      });
+    }
+
+    const orgId = caller.organizationId;
+
+    return this.prisma.$transaction(async (tx) => {
+      // Lock the department row for update
+      await tx.$queryRaw`
+        SELECT id FROM departments
+        WHERE id = ${departmentId}::uuid AND organization_id = ${orgId}::uuid
+        FOR UPDATE
+      `;
+
+      const department = await tx.department.findFirst({
+        where: {
+          id: departmentId,
+          organizationId: orgId,
+          archivedAt: null,
+        },
+        select: {
+          id: true,
+          name: true,
+          headEmployeeId: true,
+          headEmployee: {
+            select: { id: true, userId: true },
+          },
+        },
+      });
+
+      if (!department) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Department not found',
+        });
+      }
+
+      let newHeadUserId: string | null = null;
+      if (dto.employeeId !== null) {
+        const targetEmployee = await tx.employee.findFirst({
+          where: {
+            id: dto.employeeId,
+            organizationId: orgId,
+          },
+          select: {
+            id: true,
+            userId: true,
+            employmentStatus: true,
+          },
+        });
+
+        if (!targetEmployee) {
+          throw new NotFoundException({
+            code: 'NOT_FOUND',
+            message: 'Employee not found in this organization',
+          });
+        }
+        if (targetEmployee.employmentStatus !== 'active') {
+          throw new BadRequestException({
+            code: 'EMPLOYEE_INACTIVE',
+            message: 'Cannot assign an inactive employee as department head',
+          });
+        }
+        newHeadUserId = targetEmployee.userId;
+      }
+
+      const deptHeadRole = await tx.role.findFirst({
+        where: {
+          organizationId: orgId,
+          name: 'department_head',
+        },
+        select: { id: true },
+      });
+
+      const previousHeadEmployeeId = department.headEmployeeId;
+      const previousHeadUserId = department.headEmployee?.userId ?? null;
+
+      // Update department head
+      const updated = await tx.department.update({
+        where: {
+          organizationId_id: {
+            organizationId: orgId,
+            id: department.id,
+          },
+        },
+        data: {
+          headEmployeeId: dto.employeeId,
+        },
+        include: {
+          headEmployee: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              employeeCode: true,
+            },
+          },
+        },
+      });
+
+      // Sync department_head role in user_roles
+      if (deptHeadRole) {
+        if (newHeadUserId) {
+          await tx.userRole.upsert({
+            where: {
+              userId_roleId: {
+                userId: newHeadUserId,
+                roleId: deptHeadRole.id,
+              },
+            },
+            update: {},
+            create: {
+              organizationId: orgId,
+              userId: newHeadUserId,
+              roleId: deptHeadRole.id,
+              assignedBy: caller.userId,
+            },
+          });
+        }
+
+        if (
+          previousHeadEmployeeId &&
+          previousHeadEmployeeId !== dto.employeeId &&
+          previousHeadUserId
+        ) {
+          const otherHeadedCount = await tx.department.count({
+            where: {
+              organizationId: orgId,
+              archivedAt: null,
+              headEmployeeId: previousHeadEmployeeId,
+              id: { not: department.id },
+            },
+          });
+
+          if (otherHeadedCount === 0) {
+            await tx.userRole.deleteMany({
+              where: {
+                organizationId: orgId,
+                userId: previousHeadUserId,
+                roleId: deptHeadRole.id,
+              },
+            });
+          }
+        }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          actorUserId: caller.userId,
+          action: dto.employeeId
+            ? 'department.head.assigned'
+            : 'department.head.removed',
+          entityType: 'department',
+          entityId: department.id,
+          metadata: {
+            departmentName: department.name,
+            previousHeadEmployeeId,
+            newHeadEmployeeId: dto.employeeId,
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        name: updated.name,
+        description: updated.description,
+        headEmployeeId: updated.headEmployeeId,
+        headEmployee: updated.headEmployee
+          ? {
+              id: updated.headEmployee.id,
+              name: `${updated.headEmployee.firstName} ${updated.headEmployee.lastName}`.trim(),
+              employeeCode: updated.headEmployee.employeeCode,
+            }
+          : null,
+      };
+    });
   }
 }
 
