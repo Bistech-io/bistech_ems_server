@@ -167,4 +167,49 @@ describe('DashboardService', () => {
       ForbiddenException,
     );
   });
+
+  it('returns summary overview for Super Admin even without an employee profile', async () => {
+    const repo = createMockRepo({
+      findEmployeeProfileByUserId: vi.fn().mockResolvedValue(null),
+    });
+    const service = new DashboardService(repo);
+    const adminCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-admin',
+      roles: ['super_admin'],
+    };
+
+    const summary = await service.getSummaryDashboard(
+      adminCaller,
+      new Date('2026-11-18T04:00:00Z'),
+    );
+
+    expect(summary.primaryRole).toBe('super_admin');
+    expect(summary.availableViews).toEqual(['company', 'hr', 'me']);
+    expect(summary.company).not.toBeNull();
+    expect(summary.me).toBeNull();
+  });
+
+  it('returns summary overview for regular employee with me view only', async () => {
+    const repo = createMockRepo();
+    const service = new DashboardService(repo);
+    const empCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-emp',
+      roles: ['employee'],
+    };
+
+    const summary = await service.getSummaryDashboard(
+      empCaller,
+      new Date('2026-11-18T04:00:00Z'),
+    );
+
+    expect(summary.primaryRole).toBe('employee');
+    expect(summary.availableViews).toEqual(['me']);
+    expect(summary.company).toBeNull();
+    expect(summary.hr).toBeNull();
+    expect(summary.me?.employee.employeeCode).toBe('BST-00142');
+  });
 });

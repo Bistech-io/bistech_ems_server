@@ -47,4 +47,16 @@ export class DashboardController {
       meta: null,
     };
   }
+
+  @Get('summary')
+  async getSummaryDashboard(@Req() req: Request) {
+    const data = await this.dashboardService.getSummaryDashboard(req.user!);
+
+    return {
+      success: true,
+      message: 'Overview dashboard summary retrieved',
+      data,
+      meta: null,
+    };
+  }
 }

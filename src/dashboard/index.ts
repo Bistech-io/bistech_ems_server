@@ -22,3 +22,7 @@ export type {
   CompanyFeedbackBreakdownDto,
   CompanyGovernanceSummaryDto,
 } from './dto/company-dashboard.response.dto.js';
+export type {
+  DashboardRoleView,
+  SummaryDashboardResponseDto,
+} from './dto/summary-dashboard.response.dto.js';
