@@ -17,6 +17,7 @@ describe('AuthService', () => {
       },
       user: {
         findUnique: vi.fn(),
+        findFirst: vi.fn(),
         update: vi.fn(),
       },
       userSession: {
@@ -385,6 +386,48 @@ describe('AuthService', () => {
         },
         data: expect.objectContaining({
           revokedReason: 'user_revoke',
+        }),
+      });
+    });
+
+    it('resets password for authenticated user (first-login/logged-in session)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      const result = await authService.resetPassword(
+        { newPassword: 'BrandNewPassword123!' },
+        undefined,
+        callerUser,
+      );
+
+      expect(result.message).toContain('Password reset successfully');
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: expect.objectContaining({
+          failedLoginCount: 0,
+          lockedUntil: null,
+          accountStatus: 'active',
+        }),
+      });
+      expect(mockPrisma.userSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          organizationId: 'org-1',
+          userId: 'user-1',
+          id: { not: 'a0000000-0000-0000-0000-000000000001' },
+          revokedAt: null,
+        },
+        data: expect.objectContaining({
+          revokedReason: 'password_reset',
         }),
       });
     });
