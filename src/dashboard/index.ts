@@ -17,3 +17,8 @@ export type {
   HrTodayAttendanceSummaryDto,
   HrWorkforceSummaryDto,
 } from './dto/hr-dashboard.response.dto.js';
+export type {
+  CompanyDashboardResponseDto,
+  CompanyFeedbackBreakdownDto,
+  CompanyGovernanceSummaryDto,
+} from './dto/company-dashboard.response.dto.js';

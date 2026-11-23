@@ -35,4 +35,16 @@ export class DashboardController {
       meta: null,
     };
   }
+
+  @Get('company')
+  async getCompanyDashboard(@Req() req: Request) {
+    const data = await this.dashboardService.getCompanyDashboard(req.user!);
+
+    return {
+      success: true,
+      message: 'Company dashboard retrieved',
+      data,
+      meta: null,
+    };
+  }
 }

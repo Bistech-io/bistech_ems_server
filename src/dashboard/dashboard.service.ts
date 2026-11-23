@@ -8,6 +8,8 @@ import {
 import { DashboardRepository } from './dashboard.repository.js';
 import type { EmployeeDashboardResponseDto } from './dto/employee-dashboard.response.dto.js';
 import type { HrDashboardResponseDto } from './dto/hr-dashboard.response.dto.js';
+import type { CompanyDashboardResponseDto } from './dto/company-dashboard.response.dto.js';
+import { computeCompanyDashboardMetrics } from './metrics/company.metrics.js';
 import { computeEmployeeDashboardMetrics } from './metrics/employee.metrics.js';
 import { computeHrDashboardMetrics } from './metrics/hr.metrics.js';
 
@@ -126,6 +128,78 @@ export class DashboardService {
       taskAssignments,
       openFeedbackCount,
       auditLogs,
+    });
+  }
+
+  async getCompanyDashboard(
+    caller: AuthenticatedUser,
+    now: Date = new Date(),
+  ): Promise<CompanyDashboardResponseDto> {
+    if (!caller.roles.includes('super_admin')) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only Super Admins can access the company dashboard',
+      });
+    }
+
+    const org = await this.dashboardRepo.findOrganizationConfig(caller.organizationId);
+    if (!org) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Organization not found',
+      });
+    }
+
+    const { dateStr: todayDateStr } = getOrgZonedParts(now, org.timezone);
+    const monthStart = getMonthStartIso(todayDateStr);
+
+    const [
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      feedbackByKind,
+      auditLogs,
+      activeTeamsCount,
+      departmentsWithHead,
+      pendingReviewsCount,
+    ] = await Promise.all([
+      this.dashboardRepo.findOrgDepartments(caller.organizationId),
+      this.dashboardRepo.findOrgEmployeesForHrDashboard(caller.organizationId),
+      this.dashboardRepo.findHolidayDates(caller.organizationId, monthStart, todayDateStr),
+      this.dashboardRepo.findOrgAttendanceInRange(
+        caller.organizationId,
+        monthStart,
+        todayDateStr,
+      ),
+      this.dashboardRepo.findOrgTaskAssignments(caller.organizationId),
+      this.dashboardRepo.countOrgOpenFeedbackByKind(caller.organizationId),
+      this.dashboardRepo.findRecentOrgAuditLogs(caller.organizationId),
+      this.dashboardRepo.countActiveTeams(caller.organizationId),
+      this.dashboardRepo.countDepartmentsWithHead(caller.organizationId),
+      this.dashboardRepo.countPendingReviewsExcludingUser(
+        caller.organizationId,
+        caller.userId,
+      ),
+    ]);
+
+    return computeCompanyDashboardMetrics({
+      now,
+      timezone: org.timezone,
+      settings: org.settings,
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      openFeedbackCount: feedbackByKind.issues + feedbackByKind.suggestions,
+      auditLogs,
+      activeTeamsCount,
+      departmentsWithHead,
+      pendingReviewsCount,
+      openIssuesCount: feedbackByKind.issues,
+      openSuggestionsCount: feedbackByKind.suggestions,
     });
   }
 }

@@ -59,6 +59,10 @@ function createMockRepo(overrides: Partial<DashboardRepository> = {}): Dashboard
     findOrgTaskAssignments: vi.fn().mockResolvedValue([]),
     countOrgOpenFeedback: vi.fn().mockResolvedValue(3),
     findRecentOrgAuditLogs: vi.fn().mockResolvedValue([]),
+    countActiveTeams: vi.fn().mockResolvedValue(2),
+    countDepartmentsWithHead: vi.fn().mockResolvedValue(1),
+    countPendingReviewsExcludingUser: vi.fn().mockResolvedValue(4),
+    countOrgOpenFeedbackByKind: vi.fn().mockResolvedValue({ issues: 2, suggestions: 1 }),
     ...overrides,
   } as unknown as DashboardRepository;
 }
@@ -117,6 +121,49 @@ describe('DashboardService', () => {
     };
 
     await expect(service.getHrOverviewDashboard(empCaller)).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('returns company dashboard for Super Admin', async () => {
+    const repo = createMockRepo();
+    const service = new DashboardService(repo);
+    const adminCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-admin',
+      roles: ['super_admin'],
+    };
+
+    const companyDashboard = await service.getCompanyDashboard(
+      adminCaller,
+      new Date('2026-11-18T04:00:00Z'),
+    );
+
+    expect(companyDashboard.governance).toEqual({
+      activeTeamsCount: 2,
+      totalDepartments: 1,
+      departmentsWithHead: 1,
+      pendingReviewsCount: 4,
+    });
+    expect(companyDashboard.feedbackBreakdown).toEqual({
+      openTotal: 3,
+      issues: 2,
+      suggestions: 1,
+    });
+  });
+
+  it('throws 403 FORBIDDEN when HR Manager requests company dashboard', async () => {
+    const repo = createMockRepo();
+    const service = new DashboardService(repo);
+    const hrCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-hr',
+      roles: ['hr_manager'],
+    };
+
+    await expect(service.getCompanyDashboard(hrCaller)).rejects.toThrow(
       ForbiddenException,
     );
   });
