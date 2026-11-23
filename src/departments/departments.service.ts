@@ -1,16 +1,28 @@
 import {
-  BadRequestException,
-  ForbiddenException,
   Injectable,
+  ForbiddenException,
+  BadRequestException,
   NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
-import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import { PrismaService } from '../database/prisma.service.js';
-import type { AssignDepartmentHeadDto } from './dto/assign-department-head.dto.js';
+import type { AuthenticatedUser } from '../auth/auth.guard.js';
 
 @Injectable()
 export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private checkManagePermission(caller: AuthenticatedUser) {
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isHrManager = caller.roles.includes('hr_manager');
+
+    if (!isSuperAdmin && !isHrManager) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only HR Managers or Super Admins can manage designations',
+      });
+    }
+  }
 
   async listDepartments(organizationId: string) {
     const departments = await this.prisma.department.findMany({
@@ -81,191 +93,175 @@ export class DepartmentsService {
     }));
   }
 
-  async assignDepartmentHead(
-    departmentId: string,
-    dto: AssignDepartmentHeadDto,
-    caller: AuthenticatedUser,
-  ) {
-    if (!caller.roles.includes('super_admin')) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'Only Super Admins can assign or remove a department head',
+  async createDesignation(organizationId: string, title: string, caller: AuthenticatedUser) {
+    this.checkManagePermission(caller);
+
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Designation title is required',
       });
     }
 
-    const orgId = caller.organizationId;
-
-    return this.prisma.$transaction(async (tx) => {
-      // Lock the department row for update
-      await tx.$queryRaw`
-        SELECT id FROM departments
-        WHERE id = ${departmentId}::uuid AND organization_id = ${orgId}::uuid
-        FOR UPDATE
-      `;
-
-      const department = await tx.department.findFirst({
-        where: {
-          id: departmentId,
-          organizationId: orgId,
-          archivedAt: null,
-        },
-        select: {
-          id: true,
-          name: true,
-          headEmployeeId: true,
-          headEmployee: {
-            select: { id: true, userId: true },
-          },
-        },
-      });
-
-      if (!department) {
-        throw new NotFoundException({
-          code: 'NOT_FOUND',
-          message: 'Department not found',
-        });
-      }
-
-      let newHeadUserId: string | null = null;
-      if (dto.employeeId !== null) {
-        const targetEmployee = await tx.employee.findFirst({
-          where: {
-            id: dto.employeeId,
-            organizationId: orgId,
-          },
+    const existing = await this.prisma.designation.findFirst({
+      where: {
+        organizationId,
+        title: { equals: normalizedTitle, mode: 'insensitive' },
+      },
+      include: {
+        _count: {
           select: {
-            id: true,
-            userId: true,
-            employmentStatus: true,
+            employees: {
+              where: { employmentStatus: 'active' },
+            },
           },
+        },
+      },
+    });
+
+    if (existing) {
+      if (existing.archivedAt) {
+        const restored = await this.prisma.designation.update({
+          where: { id: existing.id },
+          data: { archivedAt: null },
         });
-
-        if (!targetEmployee) {
-          throw new NotFoundException({
-            code: 'NOT_FOUND',
-            message: 'Employee not found in this organization',
-          });
-        }
-        if (targetEmployee.employmentStatus !== 'active') {
-          throw new BadRequestException({
-            code: 'EMPLOYEE_INACTIVE',
-            message: 'Cannot assign an inactive employee as department head',
-          });
-        }
-        newHeadUserId = targetEmployee.userId;
+        return {
+          id: restored.id,
+          title: restored.title,
+          activeEmployeeCount: existing._count.employees,
+          createdAt: restored.createdAt,
+        };
       }
-
-      const deptHeadRole = await tx.role.findFirst({
-        where: {
-          organizationId: orgId,
-          name: 'department_head',
-        },
-        select: { id: true },
-      });
-
-      const previousHeadEmployeeId = department.headEmployeeId;
-      const previousHeadUserId = department.headEmployee?.userId ?? null;
-
-      // Update department head
-      const updated = await tx.department.update({
-        where: {
-          organizationId_id: {
-            organizationId: orgId,
-            id: department.id,
-          },
-        },
-        data: {
-          headEmployeeId: dto.employeeId,
-        },
-        include: {
-          headEmployee: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              employeeCode: true,
-            },
-          },
-        },
-      });
-
-      // Sync department_head role in user_roles
-      if (deptHeadRole) {
-        if (newHeadUserId) {
-          await tx.userRole.upsert({
-            where: {
-              userId_roleId: {
-                userId: newHeadUserId,
-                roleId: deptHeadRole.id,
-              },
-            },
-            update: {},
-            create: {
-              organizationId: orgId,
-              userId: newHeadUserId,
-              roleId: deptHeadRole.id,
-              assignedBy: caller.userId,
-            },
-          });
-        }
-
-        if (
-          previousHeadEmployeeId &&
-          previousHeadEmployeeId !== dto.employeeId &&
-          previousHeadUserId
-        ) {
-          const otherHeadedCount = await tx.department.count({
-            where: {
-              organizationId: orgId,
-              archivedAt: null,
-              headEmployeeId: previousHeadEmployeeId,
-              id: { not: department.id },
-            },
-          });
-
-          if (otherHeadedCount === 0) {
-            await tx.userRole.deleteMany({
-              where: {
-                organizationId: orgId,
-                userId: previousHeadUserId,
-                roleId: deptHeadRole.id,
-              },
-            });
-          }
-        }
-      }
-
-      await tx.auditLog.create({
-        data: {
-          organizationId: orgId,
-          actorUserId: caller.userId,
-          action: dto.employeeId
-            ? 'department.head.assigned'
-            : 'department.head.removed',
-          entityType: 'department',
-          entityId: department.id,
-          metadata: {
-            departmentName: department.name,
-            previousHeadEmployeeId,
-            newHeadEmployeeId: dto.employeeId,
-          },
-        },
-      });
-
       return {
-        id: updated.id,
-        name: updated.name,
-        description: updated.description,
-        headEmployeeId: updated.headEmployeeId,
-        headEmployee: updated.headEmployee
-          ? {
-              id: updated.headEmployee.id,
-              name: `${updated.headEmployee.firstName} ${updated.headEmployee.lastName}`.trim(),
-              employeeCode: updated.headEmployee.employeeCode,
-            }
-          : null,
+        id: existing.id,
+        title: existing.title,
+        activeEmployeeCount: existing._count.employees,
+        createdAt: existing.createdAt,
       };
+    }
+
+    const created = await this.prisma.designation.create({
+      data: {
+        organizationId,
+        title: normalizedTitle,
+      },
+    });
+
+    return {
+      id: created.id,
+      title: created.title,
+      activeEmployeeCount: 0,
+      createdAt: created.createdAt,
+    };
+  }
+
+  async updateDesignation(
+    organizationId: string,
+    id: string,
+    title: string,
+    caller: AuthenticatedUser,
+  ) {
+    this.checkManagePermission(caller);
+
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Designation title is required',
+      });
+    }
+
+    const existing = await this.prisma.designation.findFirst({
+      where: {
+        id,
+        organizationId,
+        archivedAt: null,
+      },
+      include: {
+        _count: {
+          select: {
+            employees: {
+              where: { employmentStatus: 'active' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Designation not found',
+      });
+    }
+
+    const duplicate = await this.prisma.designation.findFirst({
+      where: {
+        organizationId,
+        id: { not: id },
+        title: { equals: normalizedTitle, mode: 'insensitive' },
+        archivedAt: null,
+      },
+    });
+
+    if (duplicate) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Another designation with this title already exists',
+      });
+    }
+
+    const updated = await this.prisma.designation.update({
+      where: { id },
+      data: { title: normalizedTitle },
+    });
+
+    return {
+      id: updated.id,
+      title: updated.title,
+      activeEmployeeCount: existing._count.employees,
+      createdAt: updated.createdAt,
+    };
+  }
+
+  async deleteDesignation(organizationId: string, id: string, caller: AuthenticatedUser) {
+    this.checkManagePermission(caller);
+
+    const existing = await this.prisma.designation.findFirst({
+      where: {
+        id,
+        organizationId,
+        archivedAt: null,
+      },
+      include: {
+        _count: {
+          select: {
+            employees: {
+              where: { employmentStatus: 'active' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Designation not found',
+      });
+    }
+
+    if (existing._count.employees > 0) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Cannot archive designation while active employees are assigned to it',
+      });
+    }
+
+    await this.prisma.designation.update({
+      where: { id },
+      data: { archivedAt: new Date() },
     });
   }
 }
-
