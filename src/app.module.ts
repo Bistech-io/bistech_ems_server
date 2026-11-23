@@ -8,6 +8,8 @@ import { EmployeesModule } from './employees/employees.module.js';
 import { AttendanceModule } from './attendance/index.js';
 import { DashboardModule } from './dashboard/index.js';
 import { OrganizationModule } from './organization/organization.module.js';
+import { UsersModule } from './users/index.js';
+import { TasksModule } from './tasks/index.js';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { OrganizationModule } from './organization/organization.module.js';
     AttendanceModule,
     DashboardModule,
     OrganizationModule,
+    UsersModule,
+    TasksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

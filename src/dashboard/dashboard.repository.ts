@@ -6,6 +6,12 @@ import type {
   RawNotificationRow,
   RawTaskAssignmentRow,
 } from './metrics/employee.metrics.js';
+import type {
+  RawHrEmployeeRow,
+  RawOrgAuditLogRow,
+  RawOrgDepartmentRow,
+  RawOrgTaskAssignmentRow,
+} from './metrics/hr.metrics.js';
 
 @Injectable()
 export class DashboardRepository {
@@ -203,5 +209,191 @@ export class DashboardRepository {
         createdAt: true,
       },
     });
+  }
+
+  async findOrganizationConfig(
+    organizationId: string,
+  ): Promise<{ timezone: string; settings: unknown } | null> {
+    return this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { timezone: true, settings: true },
+    });
+  }
+
+  async findOrgDepartments(organizationId: string): Promise<RawOrgDepartmentRow[]> {
+    return this.prisma.department.findMany({
+      where: { organizationId, archivedAt: null },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+  }
+
+  async findOrgEmployeesForHrDashboard(
+    organizationId: string,
+  ): Promise<RawHrEmployeeRow[]> {
+    const rows = await this.prisma.employee.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        employeeCode: true,
+        firstName: true,
+        lastName: true,
+        employmentStatus: true,
+        joiningDate: true,
+        exitDate: true,
+        departmentId: true,
+        department: { select: { name: true } },
+        designation: { select: { title: true } },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      employeeCode: r.employeeCode,
+      firstName: r.firstName,
+      lastName: r.lastName,
+      employmentStatus: r.employmentStatus,
+      joiningDate: r.joiningDate,
+      exitDate: r.exitDate,
+      departmentId: r.departmentId,
+      departmentName: r.department.name,
+      designationTitle: r.designation.title,
+    }));
+  }
+
+  async findOrgAttendanceInRange(
+    organizationId: string,
+    fromIso: string,
+    toIso: string,
+  ): Promise<(StoredAttendanceRow & { employeeId: string })[]> {
+    return this.prisma.attendanceRecord.findMany({
+      where: {
+        organizationId,
+        workDate: {
+          gte: new Date(`${fromIso}T00:00:00Z`),
+          lte: new Date(`${toIso}T00:00:00Z`),
+        },
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        workDate: true,
+        checkInAt: true,
+        status: true,
+        source: true,
+        lateMinutes: true,
+        note: true,
+      },
+    });
+  }
+
+  async findOrgTaskAssignments(
+    organizationId: string,
+  ): Promise<RawOrgTaskAssignmentRow[]> {
+    const rows = await this.prisma.taskAssignment.findMany({
+      where: {
+        organizationId,
+        status: { not: 'cancelled' },
+        task: { status: 'active' },
+      },
+      select: {
+        status: true,
+        task: { select: { dueDate: true } },
+      },
+    });
+
+    return rows.map((r) => ({
+      status: r.status,
+      dueDate: r.task.dueDate,
+    }));
+  }
+
+  async countOrgOpenFeedback(organizationId: string): Promise<number> {
+    return this.prisma.feedbackItem.count({
+      where: {
+        organizationId,
+        status: { in: ['open', 'in_review'] },
+      },
+    });
+  }
+
+  async findRecentOrgAuditLogs(
+    organizationId: string,
+    limit = 6,
+  ): Promise<RawOrgAuditLogRow[]> {
+    const rows = await this.prisma.auditLog.findMany({
+      where: { organizationId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      select: {
+        id: true,
+        action: true,
+        entityType: true,
+        entityId: true,
+        createdAt: true,
+        actor: { select: { displayName: true } },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      entityType: r.entityType,
+      entityId: r.entityId,
+      actorName: r.actor?.displayName ?? null,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  async countActiveTeams(organizationId: string): Promise<number> {
+    return this.prisma.team.count({
+      where: { organizationId, archivedAt: null },
+    });
+  }
+
+  async countDepartmentsWithHead(organizationId: string): Promise<number> {
+    return this.prisma.department.count({
+      where: {
+        organizationId,
+        archivedAt: null,
+        headEmployeeId: { not: null },
+      },
+    });
+  }
+
+  async countPendingReviewsExcludingUser(
+    organizationId: string,
+    userId: string,
+  ): Promise<number> {
+    return this.prisma.taskSubmission.count({
+      where: {
+        organizationId,
+        reviewStatus: 'pending',
+        submittedBy: { not: userId },
+      },
+    });
+  }
+
+  async countOrgOpenFeedbackByKind(
+    organizationId: string,
+  ): Promise<{ issues: number; suggestions: number }> {
+    const [issues, suggestions] = await Promise.all([
+      this.prisma.feedbackItem.count({
+        where: {
+          organizationId,
+          kind: 'issue',
+          status: { in: ['open', 'in_review'] },
+        },
+      }),
+      this.prisma.feedbackItem.count({
+        where: {
+          organizationId,
+          kind: 'suggestion',
+          status: { in: ['open', 'in_review'] },
+        },
+      }),
+    ]);
+
+    return { issues, suggestions };
   }
 }

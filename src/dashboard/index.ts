@@ -8,3 +8,21 @@ export type {
   EmployeeDashboardTasksSummaryDto,
   TaskStatusCountsDto,
 } from './dto/employee-dashboard.response.dto.js';
+export type {
+  DepartmentHeadcountDto,
+  HrAuditFeedItemDto,
+  HrDashboardResponseDto,
+  HrRecentJoinerDto,
+  HrTasksSummaryDto,
+  HrTodayAttendanceSummaryDto,
+  HrWorkforceSummaryDto,
+} from './dto/hr-dashboard.response.dto.js';
+export type {
+  CompanyDashboardResponseDto,
+  CompanyFeedbackBreakdownDto,
+  CompanyGovernanceSummaryDto,
+} from './dto/company-dashboard.response.dto.js';
+export type {
+  DashboardRoleView,
+  SummaryDashboardResponseDto,
+} from './dto/summary-dashboard.response.dto.js';

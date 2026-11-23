@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import {
   getMonthStartIso,
   getOrgZonedParts,
@@ -6,7 +7,15 @@ import {
 } from '../attendance/absence.query.js';
 import { DashboardRepository } from './dashboard.repository.js';
 import type { EmployeeDashboardResponseDto } from './dto/employee-dashboard.response.dto.js';
+import type { HrDashboardResponseDto } from './dto/hr-dashboard.response.dto.js';
+import type { CompanyDashboardResponseDto } from './dto/company-dashboard.response.dto.js';
+import type {
+  DashboardRoleView,
+  SummaryDashboardResponseDto,
+} from './dto/summary-dashboard.response.dto.js';
+import { computeCompanyDashboardMetrics } from './metrics/company.metrics.js';
 import { computeEmployeeDashboardMetrics } from './metrics/employee.metrics.js';
+import { computeHrDashboardMetrics } from './metrics/hr.metrics.js';
 
 @Injectable()
 export class DashboardService {
@@ -63,5 +72,217 @@ export class DashboardService {
       openFeedbackCount,
       notifications,
     });
+  }
+
+  async getHrOverviewDashboard(
+    caller: AuthenticatedUser,
+    now: Date = new Date(),
+  ): Promise<HrDashboardResponseDto> {
+    const isHrOrAdmin =
+      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+
+    if (!isHrOrAdmin) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only HR Managers or Super Admins can access the HR overview dashboard',
+      });
+    }
+
+    const org = await this.dashboardRepo.findOrganizationConfig(caller.organizationId);
+    if (!org) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Organization not found',
+      });
+    }
+
+    const { dateStr: todayDateStr } = getOrgZonedParts(now, org.timezone);
+    const monthStart = getMonthStartIso(todayDateStr);
+
+    const [
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      openFeedbackCount,
+      auditLogs,
+    ] = await Promise.all([
+      this.dashboardRepo.findOrgDepartments(caller.organizationId),
+      this.dashboardRepo.findOrgEmployeesForHrDashboard(caller.organizationId),
+      this.dashboardRepo.findHolidayDates(caller.organizationId, monthStart, todayDateStr),
+      this.dashboardRepo.findOrgAttendanceInRange(
+        caller.organizationId,
+        monthStart,
+        todayDateStr,
+      ),
+      this.dashboardRepo.findOrgTaskAssignments(caller.organizationId),
+      this.dashboardRepo.countOrgOpenFeedback(caller.organizationId),
+      this.dashboardRepo.findRecentOrgAuditLogs(caller.organizationId),
+    ]);
+
+    return computeHrDashboardMetrics({
+      now,
+      timezone: org.timezone,
+      settings: org.settings,
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      openFeedbackCount,
+      auditLogs,
+    });
+  }
+
+  async getCompanyDashboard(
+    caller: AuthenticatedUser,
+    now: Date = new Date(),
+  ): Promise<CompanyDashboardResponseDto> {
+    if (!caller.roles.includes('super_admin')) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only Super Admins can access the company dashboard',
+      });
+    }
+
+    const org = await this.dashboardRepo.findOrganizationConfig(caller.organizationId);
+    if (!org) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Organization not found',
+      });
+    }
+
+    const { dateStr: todayDateStr } = getOrgZonedParts(now, org.timezone);
+    const monthStart = getMonthStartIso(todayDateStr);
+
+    const [
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      feedbackByKind,
+      auditLogs,
+      activeTeamsCount,
+      departmentsWithHead,
+      pendingReviewsCount,
+    ] = await Promise.all([
+      this.dashboardRepo.findOrgDepartments(caller.organizationId),
+      this.dashboardRepo.findOrgEmployeesForHrDashboard(caller.organizationId),
+      this.dashboardRepo.findHolidayDates(caller.organizationId, monthStart, todayDateStr),
+      this.dashboardRepo.findOrgAttendanceInRange(
+        caller.organizationId,
+        monthStart,
+        todayDateStr,
+      ),
+      this.dashboardRepo.findOrgTaskAssignments(caller.organizationId),
+      this.dashboardRepo.countOrgOpenFeedbackByKind(caller.organizationId),
+      this.dashboardRepo.findRecentOrgAuditLogs(caller.organizationId),
+      this.dashboardRepo.countActiveTeams(caller.organizationId),
+      this.dashboardRepo.countDepartmentsWithHead(caller.organizationId),
+      this.dashboardRepo.countPendingReviewsExcludingUser(
+        caller.organizationId,
+        caller.userId,
+      ),
+    ]);
+
+    return computeCompanyDashboardMetrics({
+      now,
+      timezone: org.timezone,
+      settings: org.settings,
+      departments,
+      employees,
+      holidayDates,
+      monthAttendanceRows,
+      taskAssignments,
+      openFeedbackCount: feedbackByKind.issues + feedbackByKind.suggestions,
+      auditLogs,
+      activeTeamsCount,
+      departmentsWithHead,
+      pendingReviewsCount,
+      openIssuesCount: feedbackByKind.issues,
+      openSuggestionsCount: feedbackByKind.suggestions,
+    });
+  }
+
+  async getSummaryDashboard(
+    caller: AuthenticatedUser,
+    now: Date = new Date(),
+  ): Promise<SummaryDashboardResponseDto> {
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isHrManager = caller.roles.includes('hr_manager');
+    const isDeptHead = caller.roles.includes('department_head');
+
+    const primaryRole: SummaryDashboardResponseDto['primaryRole'] = isSuperAdmin
+      ? 'super_admin'
+      : isHrManager
+        ? 'hr_manager'
+        : isDeptHead
+          ? 'department_head'
+          : 'employee';
+
+    const availableViews: DashboardRoleView[] = [];
+    if (isSuperAdmin) availableViews.push('company', 'hr');
+    else if (isHrManager) availableViews.push('hr');
+    if (isDeptHead) availableViews.push('team');
+    availableViews.push('me');
+
+    const tryGetMe = async (): Promise<EmployeeDashboardResponseDto | null> => {
+      try {
+        return await this.getMyOverviewDashboard(
+          caller.organizationId,
+          caller.userId,
+          now,
+        );
+      } catch (err) {
+        if (err instanceof NotFoundException) {
+          return null;
+        }
+        throw err;
+      }
+    };
+
+    if (isSuperAdmin) {
+      const [company, me] = await Promise.all([
+        this.getCompanyDashboard(caller, now),
+        tryGetMe(),
+      ]);
+      return {
+        primaryRole,
+        availableViews,
+        company,
+        hr: null,
+        me,
+      };
+    }
+
+    if (isHrManager) {
+      const [hr, me] = await Promise.all([
+        this.getHrOverviewDashboard(caller, now),
+        tryGetMe(),
+      ]);
+      return {
+        primaryRole,
+        availableViews,
+        company: null,
+        hr,
+        me,
+      };
+    }
+
+    const me = await this.getMyOverviewDashboard(
+      caller.organizationId,
+      caller.userId,
+      now,
+    );
+    return {
+      primaryRole,
+      availableViews,
+      company: null,
+      hr: null,
+      me,
+    };
   }
 }

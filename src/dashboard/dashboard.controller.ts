@@ -23,4 +23,40 @@ export class DashboardController {
       meta: null,
     };
   }
+
+  @Get('hr')
+  async getHrDashboard(@Req() req: Request) {
+    const data = await this.dashboardService.getHrOverviewDashboard(req.user!);
+
+    return {
+      success: true,
+      message: 'HR overview dashboard retrieved',
+      data,
+      meta: null,
+    };
+  }
+
+  @Get('company')
+  async getCompanyDashboard(@Req() req: Request) {
+    const data = await this.dashboardService.getCompanyDashboard(req.user!);
+
+    return {
+      success: true,
+      message: 'Company dashboard retrieved',
+      data,
+      meta: null,
+    };
+  }
+
+  @Get('summary')
+  async getSummaryDashboard(@Req() req: Request) {
+    const data = await this.dashboardService.getSummaryDashboard(req.user!);
+
+    return {
+      success: true,
+      message: 'Overview dashboard summary retrieved',
+      data,
+      meta: null,
+    };
+  }
 }
