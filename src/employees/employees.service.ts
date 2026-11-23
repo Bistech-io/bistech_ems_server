@@ -252,6 +252,7 @@ export class EmployeesService {
         employeeCode,
         firstName: employee.firstName,
         lastName: employee.lastName,
+        fullName: `${employee.firstName} ${employee.lastName}`.trim(),
         workEmail: employee.workEmail,
         phone: employee.phone,
         department: {
