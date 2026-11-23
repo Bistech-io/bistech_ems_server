@@ -158,7 +158,11 @@ export class TasksWorkflowService {
         },
       });
 
-      if (!assignment || callerCtx.employeeId !== assignment.employeeId) {
+      if (
+        !assignment ||
+        (!caller.roles.includes('super_admin') &&
+          callerCtx.employeeId !== assignment.employeeId)
+      ) {
         throw new NotFoundException({
           code: 'NOT_FOUND',
           message: 'Task assignment not found',
@@ -271,7 +275,11 @@ export class TasksWorkflowService {
         },
       });
 
-      if (!assignment || callerCtx.employeeId !== assignment.employeeId) {
+      if (
+        !assignment ||
+        (!caller.roles.includes('super_admin') &&
+          callerCtx.employeeId !== assignment.employeeId)
+      ) {
         throw new NotFoundException({
           code: 'NOT_FOUND',
           message: 'Task assignment not found',
