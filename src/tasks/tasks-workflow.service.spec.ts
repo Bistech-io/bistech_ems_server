@@ -202,4 +202,109 @@ describe('TasksWorkflowService', () => {
       service.listComments(TASK_ID, EMPLOYEE_CALLER, { limit: 20 }),
     ).rejects.toThrow(NotFoundException);
   });
+
+  it('allows super_admin to transition assignment status to done with a note', async () => {
+    const now = new Date();
+    const assignmentUpdate = vi.fn().mockResolvedValue({
+      id: ASG_ID,
+      status: 'done',
+      startedAt: now,
+      updatedAt: now,
+    });
+    const eventCreate = vi.fn().mockResolvedValue({});
+
+    const prisma = {
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          taskAssignment: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: ASG_ID,
+              employeeId: EMP_ID,
+              status: 'in_progress',
+              startedAt: now,
+              completedAt: null,
+              task: { status: 'open' },
+            }),
+            update: assignmentUpdate,
+          },
+          taskStatusEvent: { create: eventCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const repo = {
+      findCallerEmployeeContext: vi.fn().mockResolvedValue({
+        employeeId: null,
+        departmentId: null,
+        isActive: false,
+        headedDepartmentIds: [],
+      }),
+    } as unknown as TasksRepository;
+
+    const service = new TasksWorkflowService(prisma, repo);
+    const res = await service.updateAssignmentStatus(
+      ASG_ID,
+      { status: 'done', note: 'Verified by admin' },
+      ADMIN_CALLER,
+    );
+
+    expect(res.status).toBe('done');
+    expect(assignmentUpdate).toHaveBeenCalled();
+    expect(eventCreate).toHaveBeenCalled();
+  });
+
+  it('notifies department head on requestTaskReview with targetRole dept_head', async () => {
+    const createMany = vi.fn().mockResolvedValue({ count: 1 });
+    const auditCreate = vi.fn().mockResolvedValue({});
+
+    const prisma = {
+      task: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: TASK_ID,
+          title: 'Task A',
+          departmentId: DEPT_ID,
+          createdBy: ADMIN_USER_ID,
+          assignments: [
+            {
+              employeeId: EMP_ID,
+              employee: { userId: EMP_USER_ID },
+            },
+          ],
+        }),
+      },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          department: {
+            findFirst: vi.fn().mockResolvedValue({
+              headEmployee: { userId: 'head-user-1' },
+            }),
+          },
+          notification: { createMany },
+          auditLog: { create: auditCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const repo = {
+      findCallerEmployeeContext: vi.fn().mockResolvedValue({
+        employeeId: EMP_ID,
+        departmentId: DEPT_ID,
+        isActive: true,
+        headedDepartmentIds: [],
+      }),
+    } as unknown as TasksRepository;
+
+    const service = new TasksWorkflowService(prisma, repo);
+    const res = await service.requestTaskReview(
+      TASK_ID,
+      { targetRole: 'dept_head', note: 'Please check' },
+      EMPLOYEE_CALLER,
+    );
+
+    expect(res).toEqual({
+      taskId: TASK_ID,
+      targetRole: 'dept_head',
+      notifiedCount: 1,
+    });
+    expect(createMany).toHaveBeenCalled();
+    expect(auditCreate).toHaveBeenCalled();
+  });
 });

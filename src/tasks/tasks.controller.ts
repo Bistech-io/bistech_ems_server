@@ -29,6 +29,7 @@ import {
 } from './dto/task-board.dto.js';
 import {
   createSubmissionSchema,
+  requestTaskReviewSchema,
   updateAssignmentStatusSchema,
 } from './dto/task-workflow.dto.js';
 import { TasksWorkflowService } from './tasks-workflow.service.js';
@@ -389,6 +390,48 @@ export class TasksController {
     return {
       success: true,
       message: 'Submission recorded successfully',
+      data,
+      meta: null,
+    };
+  }
+
+  @Post(':id/review')
+  @HttpCode(HttpStatus.OK)
+  async requestTaskReview(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    if (!idCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [{ field: 'id', message: 'id must be a valid UUID' }],
+      });
+    }
+
+    const parseResult = requestTaskReviewSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.workflowService.requestTaskReview(
+      idCheck.data,
+      parseResult.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: 'Review request sent successfully',
       data,
       meta: null,
     };

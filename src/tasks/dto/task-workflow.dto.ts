@@ -2,7 +2,15 @@ import { z } from 'zod';
 
 export const updateAssignmentStatusSchema = z
   .object({
-    status: z.enum(['todo', 'in_progress']),
+    status: z.enum([
+      'todo',
+      'in_progress',
+      'in_review',
+      'changes_requested',
+      'done',
+      'cancelled',
+    ]),
+    note: z.string().trim().max(500).optional(),
   })
   .strict();
 
@@ -78,6 +86,7 @@ export type ListCommentsQueryDto = z.infer<typeof listCommentsQuerySchema>;
 
 export const createCommentSchema = z
   .object({
+    kind: z.enum(['comment', 'suggestion']).default('comment'),
     body: z
       .string()
       .trim()
@@ -87,3 +96,13 @@ export const createCommentSchema = z
   .strict();
 
 export type CreateCommentDto = z.infer<typeof createCommentSchema>;
+
+export const requestTaskReviewSchema = z
+  .object({
+    targetRole: z.enum(['assignee', 'dept_head']),
+    targetEmployeeId: z.string().uuid('targetEmployeeId must be a valid UUID').optional(),
+    note: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export type RequestTaskReviewDto = z.infer<typeof requestTaskReviewSchema>;

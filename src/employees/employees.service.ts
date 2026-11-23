@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import { CreateEmployeeDto } from './dto/create-employee.dto.js';
+import type { UpdateEmployeeDto } from './dto/update-employee.dto.js';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
 
 @Injectable()
@@ -300,6 +301,36 @@ export class EmployeesService {
       organizationId: orgId,
     };
 
+    const isHrOrAdmin =
+      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+    const isDeptHead = caller.roles.includes('department_head');
+
+    if (!isHrOrAdmin) {
+      if (isDeptHead) {
+        const callerEmp = await this.prisma.employee.findFirst({
+          where: { organizationId: orgId, userId: caller.userId },
+          select: {
+            id: true,
+            departmentsHeaded: {
+              where: { organizationId: orgId, archivedAt: null },
+              select: { id: true },
+            },
+          },
+        });
+        const headedIds = callerEmp?.departmentsHeaded.map((d) => d.id) ?? [];
+        where.AND = [
+          {
+            OR: [
+              ...(headedIds.length > 0 ? [{ departmentId: { in: headedIds } }] : []),
+              { userId: caller.userId },
+            ],
+          },
+        ];
+      } else {
+        where.userId = caller.userId;
+      }
+    }
+
     if (params?.departmentId) {
       where.departmentId = params.departmentId;
     }
@@ -417,6 +448,33 @@ export class EmployeesService {
       });
     }
 
+    const isHrOrAdmin =
+      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+    const isOwner = employee.user.id === caller.userId;
+
+    if (!isHrOrAdmin && !isOwner) {
+      let isManagedHead = false;
+      if (caller.roles.includes('department_head')) {
+        const headed = await this.prisma.department.findFirst({
+          where: {
+            organizationId: caller.organizationId,
+            id: employee.department.id,
+            archivedAt: null,
+            headEmployee: { userId: caller.userId },
+          },
+          select: { id: true },
+        });
+        isManagedHead = Boolean(headed);
+      }
+
+      if (!isManagedHead) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Employee record not found',
+        });
+      }
+    }
+
     return {
       id: employee.id,
       employeeCode: employee.employeeCode,
@@ -440,6 +498,147 @@ export class EmployeesService {
       },
       createdAt: employee.createdAt,
     };
+  }
+
+  async updateEmployee(
+    id: string,
+    dto: UpdateEmployeeDto,
+    caller: AuthenticatedUser,
+  ) {
+    const isHrOrAdmin =
+      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+
+    if (!isHrOrAdmin) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only HR Managers or Super Admins can update employee work records',
+      });
+    }
+
+    const orgId = caller.organizationId;
+
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.employee.findUnique({
+        where: { organizationId_id: { organizationId: orgId, id } },
+        select: {
+          id: true,
+          departmentId: true,
+          designationId: true,
+        },
+      });
+
+      if (!existing) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Employee record not found',
+        });
+      }
+
+      let nextDepartmentId = existing.departmentId;
+      let nextDesignationId = existing.designationId;
+
+      if (dto.departmentId && dto.departmentId !== existing.departmentId) {
+        const dept = await tx.department.findFirst({
+          where: { id: dto.departmentId, organizationId: orgId, archivedAt: null },
+          select: { id: true },
+        });
+        if (!dept) {
+          throw new NotFoundException({
+            code: 'NOT_FOUND',
+            message: 'Department not found',
+          });
+        }
+        nextDepartmentId = dept.id;
+      }
+
+      if (dto.designationId) {
+        const desig = await tx.designation.findFirst({
+          where: { id: dto.designationId, organizationId: orgId, archivedAt: null },
+          select: { id: true },
+        });
+        if (!desig) {
+          throw new NotFoundException({
+            code: 'NOT_FOUND',
+            message: 'Designation not found',
+          });
+        }
+        nextDesignationId = desig.id;
+      } else if (dto.designationTitle) {
+        const existingDesig = await tx.designation.findFirst({
+          where: {
+            organizationId: orgId,
+            title: { equals: dto.designationTitle, mode: 'insensitive' },
+            archivedAt: null,
+          },
+          select: { id: true },
+        });
+
+        if (existingDesig) {
+          nextDesignationId = existingDesig.id;
+        } else {
+          const createdDesig = await tx.designation.create({
+            data: { organizationId: orgId, title: dto.designationTitle },
+            select: { id: true },
+          });
+          nextDesignationId = createdDesig.id;
+        }
+      }
+
+      await tx.employee.update({
+        where: { organizationId_id: { organizationId: orgId, id } },
+        data: {
+          departmentId: nextDepartmentId,
+          designationId: nextDesignationId,
+        },
+      });
+
+      const today = new Date();
+      if (nextDepartmentId !== existing.departmentId) {
+        await tx.employeeEmploymentHistory.create({
+          data: {
+            organizationId: orgId,
+            employeeId: id,
+            eventType: HistoryEventType.department_change,
+            effectiveDate: today,
+            oldValue: { departmentId: existing.departmentId },
+            newValue: { departmentId: nextDepartmentId },
+            reason: dto.reason ?? null,
+            changedBy: caller.userId,
+          },
+        });
+      }
+
+      if (nextDesignationId !== existing.designationId) {
+        await tx.employeeEmploymentHistory.create({
+          data: {
+            organizationId: orgId,
+            employeeId: id,
+            eventType: HistoryEventType.designation_change,
+            effectiveDate: today,
+            oldValue: { designationId: existing.designationId },
+            newValue: { designationId: nextDesignationId },
+            reason: dto.reason ?? null,
+            changedBy: caller.userId,
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          actorUserId: caller.userId,
+          action: 'employee.updated',
+          entityType: 'employee',
+          entityId: id,
+          metadata: {
+            departmentChanged: nextDepartmentId !== existing.departmentId,
+            designationChanged: nextDesignationId !== existing.designationId,
+          },
+        },
+      });
+    });
+
+    return this.getEmployeeById(id, caller);
   }
 }
 

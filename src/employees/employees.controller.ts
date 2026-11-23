@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Param,
   Query,
   Body,
@@ -16,6 +17,7 @@ import type { Request } from 'express';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { EmployeesService } from './employees.service.js';
 import { createEmployeeSchema } from './dto/create-employee.dto.js';
+import { updateEmployeeSchema } from './dto/update-employee.dto.js';
 import { EmploymentStatus } from '@prisma/client';
 
 @Controller('employees')
@@ -91,6 +93,38 @@ export class EmployeesController {
     return {
       success: true,
       message: 'Employee details retrieved',
+      data: employee,
+      meta: null,
+    };
+  }
+
+  @Patch(':id')
+  async updateEmployee(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const parseResult = updateEmployeeSchema.safeParse(body ?? {});
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const employee = await this.employeesService.updateEmployee(
+      id,
+      parseResult.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: 'Employee updated successfully',
       data: employee,
       meta: null,
     };
