@@ -36,3 +36,4 @@ export const updateDepartmentSchema = z
   .strict();
 
 export type UpdateDepartmentDto = z.infer<typeof updateDepartmentSchema>;
+
