@@ -344,4 +344,56 @@ export class DashboardRepository {
       createdAt: r.createdAt,
     }));
   }
+
+  async countActiveTeams(organizationId: string): Promise<number> {
+    return this.prisma.team.count({
+      where: { organizationId, archivedAt: null },
+    });
+  }
+
+  async countDepartmentsWithHead(organizationId: string): Promise<number> {
+    return this.prisma.department.count({
+      where: {
+        organizationId,
+        archivedAt: null,
+        headEmployeeId: { not: null },
+      },
+    });
+  }
+
+  async countPendingReviewsExcludingUser(
+    organizationId: string,
+    userId: string,
+  ): Promise<number> {
+    return this.prisma.taskSubmission.count({
+      where: {
+        organizationId,
+        reviewStatus: 'pending',
+        submittedBy: { not: userId },
+      },
+    });
+  }
+
+  async countOrgOpenFeedbackByKind(
+    organizationId: string,
+  ): Promise<{ issues: number; suggestions: number }> {
+    const [issues, suggestions] = await Promise.all([
+      this.prisma.feedbackItem.count({
+        where: {
+          organizationId,
+          kind: 'issue',
+          status: { in: ['open', 'in_review'] },
+        },
+      }),
+      this.prisma.feedbackItem.count({
+        where: {
+          organizationId,
+          kind: 'suggestion',
+          status: { in: ['open', 'in_review'] },
+        },
+      }),
+    ]);
+
+    return { issues, suggestions };
+  }
 }
