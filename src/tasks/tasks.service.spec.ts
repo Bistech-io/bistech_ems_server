@@ -250,4 +250,149 @@ describe('TasksService', () => {
     expect(createManyEvents).toHaveBeenCalled();
     expect(auditCreate).toHaveBeenCalled();
   });
+
+  it('allows Employee and HR Manager to create self tasks with requiresReview defaulting to false', async () => {
+    const assignmentCreate = vi.fn().mockResolvedValue({ id: 'asg-self' });
+    const prisma = {
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          task: {
+            create: vi.fn().mockResolvedValue({
+              id: TASK_ID,
+              title: 'Personal checklist',
+              description: null,
+              priority: 'low',
+              dueDate: null,
+              assignmentType: 'self',
+              requiresReview: false,
+              status: 'active',
+              department: { id: DEPT_ID, name: 'Engineering' },
+              team: null,
+              createdAt: new Date('2026-11-23T05:00:00Z'),
+            }),
+          },
+          taskAssignment: { create: assignmentCreate },
+          taskStatusEvent: { create: vi.fn().mockResolvedValue({}) },
+          notification: { create: vi.fn() },
+          auditLog: { create: vi.fn().mockResolvedValue({}) },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const repo = {
+      findCallerEmployeeContext: vi.fn().mockResolvedValue({
+        employeeId: EMP_ID,
+        departmentId: DEPT_ID,
+        isActive: true,
+        headedDepartmentIds: [],
+      }),
+    } as unknown as TasksRepository;
+
+    const service = new TasksService(prisma, repo);
+    const created = await service.createTask(
+      {
+        title: 'Personal checklist',
+        priority: 'low',
+        assignmentType: 'self',
+      },
+      EMPLOYEE_CALLER,
+    );
+
+    expect(created).toMatchObject({
+      assignmentType: 'self',
+      requiresReview: false,
+      progress: { done: 0, total: 1 },
+    });
+    expect(assignmentCreate).toHaveBeenCalled();
+  });
+
+  it('allows Department Head to fan out a team task in headed department and rejects other departments with 404', async () => {
+    const deptHeadCaller: AuthenticatedUser = {
+      userId: 'head-user-id',
+      organizationId: ORG_ID,
+      sessionId: 'sess-head',
+      roles: ['department_head'],
+    };
+
+    const assignmentCreate = vi.fn().mockResolvedValue({ id: 'asg-team' });
+    const prisma = {
+      team: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: TEAM_ID,
+            departmentId: DEPT_ID,
+            members: [
+              { employee: { id: EMP_ID, userId: EMP_USER_ID } },
+              { employee: { id: 'emp-2', userId: 'user-2' } },
+            ],
+          })
+          .mockResolvedValueOnce({
+            id: TEAM_ID,
+            departmentId: 'other-dept-id',
+            members: [{ employee: { id: EMP_ID, userId: EMP_USER_ID } }],
+          }),
+      },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          task: {
+            create: vi.fn().mockResolvedValue({
+              id: TASK_ID,
+              title: 'Sprint release prep',
+              description: null,
+              priority: 'high',
+              dueDate: null,
+              assignmentType: 'team',
+              requiresReview: true,
+              status: 'active',
+              department: { id: DEPT_ID, name: 'Engineering' },
+              team: { id: TEAM_ID, name: 'Core Squad' },
+              createdAt: new Date('2026-11-23T05:00:00Z'),
+            }),
+          },
+          taskAssignment: { create: assignmentCreate },
+          taskStatusEvent: { create: vi.fn().mockResolvedValue({}) },
+          notification: { create: vi.fn().mockResolvedValue({}) },
+          auditLog: { create: vi.fn().mockResolvedValue({}) },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const repo = {
+      findCallerEmployeeContext: vi.fn().mockResolvedValue({
+        employeeId: 'head-emp-id',
+        departmentId: DEPT_ID,
+        isActive: true,
+        headedDepartmentIds: [DEPT_ID],
+      }),
+    } as unknown as TasksRepository;
+
+    const service = new TasksService(prisma, repo);
+    const created = await service.createTask(
+      {
+        title: 'Sprint release prep',
+        priority: 'high',
+        assignmentType: 'team',
+        teamId: TEAM_ID,
+      },
+      deptHeadCaller,
+    );
+
+    expect(created).toMatchObject({
+      assignmentType: 'team',
+      requiresReview: true,
+      progress: { done: 0, total: 2 },
+    });
+    expect(assignmentCreate).toHaveBeenCalledTimes(2);
+
+    await expect(
+      service.createTask(
+        {
+          title: 'Cross-dept task',
+          priority: 'medium',
+          assignmentType: 'team',
+          teamId: TEAM_ID,
+        },
+        deptHeadCaller,
+      ),
+    ).rejects.toThrow();
+  });
 });
