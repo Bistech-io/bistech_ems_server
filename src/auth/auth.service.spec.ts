@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service.js';
 import { PrismaService } from '../database/prisma.service.js';
+import { AUTH_CONSTANTS } from './auth.constants.js';
 
 describe('AuthService', () => {
   let authService: AuthService;
@@ -26,6 +28,19 @@ describe('AuthService', () => {
       rolePermission: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      otpChallenge: {
+        findFirst: vi.fn(),
+        count: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      authToken: {
+        findUnique: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+      $transaction: vi.fn((callback: any) => callback(mockPrisma)),
     };
 
     authService = new AuthService(mockPrisma as unknown as PrismaService);
@@ -171,6 +186,205 @@ describe('AuthService', () => {
         where: { familyId: 'family-123' },
         data: expect.objectContaining({
           revokedReason: 'reuse_detected',
+        }),
+      });
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('returns generic 202 message when org does not exist (anti-enumeration)', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
+
+      const result = await authService.forgotPassword({ email: 'unknown@bistech.com' });
+      expect(result.message).toContain('If the account exists');
+      expect(mockPrisma.otpChallenge.create).not.toHaveBeenCalled();
+    });
+
+    it('returns generic 202 message when user does not exist (anti-enumeration)', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findFirst = vi.fn().mockResolvedValue(null);
+
+      const result = await authService.forgotPassword({ email: 'unknown@bistech.com' });
+      expect(result.message).toContain('If the account exists');
+      expect(mockPrisma.otpChallenge.create).not.toHaveBeenCalled();
+    });
+
+    it('creates OTP challenge when user exists', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findFirst = vi.fn().mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        email: 'user@bistech.com',
+        accountStatus: 'active',
+      });
+      mockPrisma.otpChallenge.findFirst.mockResolvedValue(null); // No cooldown hit
+      mockPrisma.otpChallenge.count.mockResolvedValue(0); // Hourly count below limit
+      mockPrisma.otpChallenge.updateMany.mockResolvedValue({});
+      mockPrisma.otpChallenge.create.mockResolvedValue({});
+
+      const result = await authService.forgotPassword({ email: 'user@bistech.com' });
+      expect(result.message).toContain('If the account exists');
+      expect(mockPrisma.otpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'user-1',
+            purpose: 'password_reset',
+          }),
+        }),
+      );
+    });
+
+    it('respects 60s cooldown and does not create multiple challenges', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findFirst = vi.fn().mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        email: 'user@bistech.com',
+        accountStatus: 'active',
+      });
+      mockPrisma.otpChallenge.findFirst.mockResolvedValue({ id: 'recent-otp' }); // Cooldown active
+
+      const result = await authService.forgotPassword({ email: 'user@bistech.com' });
+      expect(result.message).toContain('If the account exists');
+      expect(mockPrisma.otpChallenge.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('verifyOtp', () => {
+    it('throws OTP_INVALID if user is not found', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findFirst = vi.fn().mockResolvedValue(null);
+
+      await expect(
+        authService.verifyOtp({ email: 'nobody@bistech.com', otp: '123456' }),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('throws OTP_INVALID on wrong OTP code and increments attempts', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findFirst = vi.fn().mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        email: 'user@bistech.com',
+      });
+
+      const actualHash = crypto
+        .createHmac('sha256', AUTH_CONSTANTS.JWT_SECRET)
+        .update('654321')
+        .digest('hex');
+
+      mockPrisma.otpChallenge.findFirst.mockResolvedValue({
+        id: 'challenge-1',
+        codeHash: actualHash,
+        attempts: 1,
+        maxAttempts: 5,
+        expiresAt: new Date(Date.now() + 60000),
+      });
+
+      await expect(
+        authService.verifyOtp({ email: 'user@bistech.com', otp: '000000' }),
+      ).rejects.toThrow(UnprocessableEntityException);
+
+      expect(mockPrisma.otpChallenge.update).toHaveBeenCalledWith({
+        where: { id: 'challenge-1' },
+        data: { attempts: 2, consumedAt: null },
+      });
+    });
+
+    it('consumes OTP challenge and returns reset token on correct OTP', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findFirst = vi.fn().mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        email: 'user@bistech.com',
+      });
+
+      const correctOtp = '123456';
+      const actualHash = crypto
+        .createHmac('sha256', AUTH_CONSTANTS.JWT_SECRET)
+        .update(correctOtp)
+        .digest('hex');
+
+      mockPrisma.otpChallenge.findFirst.mockResolvedValue({
+        id: 'challenge-1',
+        codeHash: actualHash,
+        attempts: 0,
+        maxAttempts: 5,
+        expiresAt: new Date(Date.now() + 60000),
+      });
+
+      mockPrisma.authToken.create.mockResolvedValue({});
+
+      const result = await authService.verifyOtp({
+        email: 'user@bistech.com',
+        otp: correctOtp,
+      });
+
+      expect(result.resetToken).toBeDefined();
+      expect(typeof result.resetToken).toBe('string');
+      expect(mockPrisma.otpChallenge.update).toHaveBeenCalledWith({
+        where: { id: 'challenge-1' },
+        data: { consumedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.authToken.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('throws UNAUTHORIZED if reset token is missing', async () => {
+      await expect(
+        authService.resetPassword({ newPassword: 'BrandNewPassword123!' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws INVALID_TOKEN if reset token does not exist or expired', async () => {
+      mockPrisma.authToken.findUnique.mockResolvedValue(null);
+
+      await expect(
+        authService.resetPassword(
+          { newPassword: 'BrandNewPassword123!' },
+          'invalid-raw-token',
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('resets password, updates user, marks token used, and revokes sessions', async () => {
+      const rawToken = 'valid-reset-token-1234567890';
+      mockPrisma.authToken.findUnique.mockResolvedValue({
+        id: 'token-1',
+        organizationId: 'org-1',
+        userId: 'user-1',
+        purpose: 'password_reset',
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60000),
+      });
+
+      const result = await authService.resetPassword(
+        { newPassword: 'BrandNewPassword123!' },
+        rawToken,
+      );
+
+      expect(result.message).toContain('Password reset successfully');
+      expect(mockPrisma.authToken.update).toHaveBeenCalledWith({
+        where: { id: 'token-1' },
+        data: { usedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: expect.objectContaining({
+          failedLoginCount: 0,
+          lockedUntil: null,
+          accountStatus: 'active',
+        }),
+      });
+      expect(mockPrisma.userSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          organizationId: 'org-1',
+          userId: 'user-1',
+          revokedAt: null,
+        },
+        data: expect.objectContaining({
+          revokedReason: 'user_revoke',
         }),
       });
     });
