@@ -6,6 +6,11 @@ export interface SensitiveEmployeeProfileDto {
   department: { id: string; name: string };
   designation: { id: string; title: string };
   employmentStatus: string;
+  joiningDate?: string | null;
+  organizationName?: string | null;
+  timezone?: string | null;
+  workStart?: string | null;
+  workEnd?: string | null;
   dateOfBirth: string | null;
   personalEmail: string | null;
   personalPhone: string | null;
@@ -26,6 +31,12 @@ export interface EmployeeWithProfileRecord {
   lastName: string;
   workEmail: string;
   employmentStatus: string;
+  joiningDate?: Date | null;
+  organization?: {
+    name: string;
+    timezone: string;
+    settings: unknown;
+  } | null;
   department: { id: string; name: string };
   designation: { id: string; title: string };
   profile: {
@@ -46,6 +57,16 @@ export function toSensitiveProfileDto(
   employee: EmployeeWithProfileRecord,
 ): SensitiveEmployeeProfileDto {
   const p = employee.profile;
+  const orgSettings =
+    employee.organization?.settings &&
+    typeof employee.organization.settings === 'object'
+      ? (employee.organization.settings as Record<string, unknown>)
+      : null;
+  const attendance =
+    orgSettings?.attendance && typeof orgSettings.attendance === 'object'
+      ? (orgSettings.attendance as Record<string, unknown>)
+      : null;
+
   return {
     employeeId: employee.id,
     employeeCode: employee.employeeCode,
@@ -54,6 +75,23 @@ export function toSensitiveProfileDto(
     department: employee.department,
     designation: employee.designation,
     employmentStatus: employee.employmentStatus,
+    ...(employee.joiningDate !== undefined
+      ? {
+          joiningDate: employee.joiningDate
+            ? employee.joiningDate.toISOString().slice(0, 10)
+            : null,
+        }
+      : {}),
+    ...(employee.organization
+      ? {
+          organizationName: employee.organization.name,
+          timezone: employee.organization.timezone,
+          workStart:
+            typeof attendance?.workStart === 'string' ? attendance.workStart : '09:00',
+          workEnd:
+            typeof attendance?.workEnd === 'string' ? attendance.workEnd : '18:00',
+        }
+      : {}),
     dateOfBirth: p?.dateOfBirth ? p.dateOfBirth.toISOString().slice(0, 10) : null,
     personalEmail: p?.personalEmail ?? null,
     personalPhone: p?.personalPhone ?? null,

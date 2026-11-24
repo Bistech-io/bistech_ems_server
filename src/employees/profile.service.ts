@@ -1,5 +1,4 @@
 import {
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,6 +14,54 @@ import {
 export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getMySensitiveProfile(
+    caller: AuthenticatedUser,
+  ): Promise<SensitiveEmployeeProfileDto> {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+      },
+      include: {
+        organization: { select: { name: true, timezone: true, settings: true } },
+        department: { select: { id: true, name: true } },
+        designation: { select: { id: true, title: true } },
+        profile: true,
+      },
+    });
+
+    if (!employee) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Employee record not found',
+      });
+    }
+
+    return toSensitiveProfileDto(employee);
+  }
+
+  async updateMySensitiveProfile(
+    dto: UpdateEmployeeProfileDto,
+    caller: AuthenticatedUser,
+  ): Promise<SensitiveEmployeeProfileDto> {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+      },
+      select: { id: true },
+    });
+
+    if (!employee) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Employee record not found',
+      });
+    }
+
+    return this.updateSensitiveProfile(employee.id, dto, caller);
+  }
+
   async getSensitiveProfile(
     employeeId: string,
     caller: AuthenticatedUser,
@@ -27,6 +74,7 @@ export class ProfileService {
         },
       },
       include: {
+        organization: { select: { name: true, timezone: true, settings: true } },
         department: { select: { id: true, name: true } },
         designation: { select: { id: true, title: true } },
         profile: true,
@@ -79,13 +127,6 @@ export class ProfileService {
     const isHrOrAdmin =
       caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
 
-    if (!isHrOrAdmin) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can update employee personal profiles',
-      });
-    }
-
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findUnique({
         where: {
@@ -95,12 +136,21 @@ export class ProfileService {
           },
         },
         include: {
+          organization: { select: { name: true, timezone: true, settings: true } },
           department: { select: { id: true, name: true } },
           designation: { select: { id: true, title: true } },
         },
       });
 
       if (!employee) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Employee record not found',
+        });
+      }
+
+      const isOwner = employee.userId === caller.userId;
+      if (!isHrOrAdmin && !isOwner) {
         throw new NotFoundException({
           code: 'NOT_FOUND',
           message: 'Employee record not found',
