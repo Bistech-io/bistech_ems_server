@@ -177,6 +177,76 @@ describe('OrganizationService', () => {
       expect(mockPrisma.organization.update).not.toHaveBeenCalled();
     });
 
+    it('allows super_admin to update settings and timezone and logs audit with previous and updated timezone', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue(mockOrg);
+      mockPrisma.organization.update.mockResolvedValue({
+        ...mockOrg,
+        timezone: 'Asia/Dubai',
+        settings: {
+          workStart: '09:00',
+          graceMinutes: 20,
+          workEnd: '18:00',
+          weekendDays: [5, 6],
+        },
+      });
+
+      const result = await service.updateSettings(
+        'org-uuid-1',
+        {
+          workStart: '09:00',
+          graceMinutes: 20,
+          workEnd: '18:00',
+          timezone: 'Asia/Dubai',
+        },
+        adminCaller,
+      );
+
+      expect(result.workStart).toBe('09:00');
+      expect(result.graceMinutes).toBe(20);
+      expect(result.workEnd).toBe('18:00');
+      expect(result.timezone).toBe('Asia/Dubai');
+      expect(result.weekendDays).toEqual([5, 6]);
+
+      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
+        where: { id: 'org-uuid-1' },
+        data: {
+          settings: {
+            workStart: '09:00',
+            graceMinutes: 20,
+            workEnd: '18:00',
+            weekendDays: [5, 6],
+          },
+          timezone: 'Asia/Dubai',
+        },
+      });
+
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          organizationId: 'org-uuid-1',
+          actorUserId: 'user-admin-uuid',
+          action: 'organization.settings.updated',
+          entityType: 'organization',
+          entityId: 'org-uuid-1',
+          metadata: {
+            previous: {
+              workStart: '10:00',
+              graceMinutes: 15,
+              workEnd: '18:30',
+              weekendDays: [5, 6],
+              timezone: 'Asia/Dhaka',
+            },
+            updated: {
+              workStart: '09:00',
+              graceMinutes: 20,
+              workEnd: '18:00',
+              weekendDays: [5, 6],
+              timezone: 'Asia/Dubai',
+            },
+          },
+        }),
+      });
+    });
+
     it('throws BadRequestException if workStart is not earlier than workEnd', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue(mockOrg);
 

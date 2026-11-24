@@ -85,6 +85,57 @@ describe('OrganizationController', () => {
       });
     });
 
+    it('validates payload and updates settings including timezone and 180 min grace period', async () => {
+      const updatedData = {
+        ...mockSettingsData,
+        workStart: '10:00',
+        workEnd: '18:30',
+        graceMinutes: 180,
+        timezone: 'Asia/Dhaka',
+      };
+      mockService.updateSettings.mockResolvedValue(updatedData);
+
+      const response = await controller.updateSettings(
+        {
+          workStart: '10:00',
+          workEnd: '18:30',
+          graceMinutes: 180,
+          timezone: 'Asia/Dhaka',
+        },
+        mockReq,
+      );
+
+      expect(mockService.updateSettings).toHaveBeenCalledWith(
+        'org-1',
+        {
+          workStart: '10:00',
+          workEnd: '18:30',
+          graceMinutes: 180,
+          timezone: 'Asia/Dhaka',
+        },
+        mockReq.user,
+      );
+      expect(response).toEqual({
+        success: true,
+        message: 'Organization settings updated successfully',
+        data: updatedData,
+        meta: null,
+      });
+    });
+
+    it('throws BadRequestException on invalid timezone', async () => {
+      await expect(
+        controller.updateSettings(
+          {
+            timezone: 'Invalid/City_Region_123',
+          },
+          mockReq,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockService.updateSettings).not.toHaveBeenCalled();
+    });
+
     it('throws BadRequestException on invalid time format', async () => {
       await expect(
         controller.updateSettings(

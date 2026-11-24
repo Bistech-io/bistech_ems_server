@@ -76,7 +76,10 @@ In-app, polled every 30 to 60 s, for task and feedback events.
 Employee, Department Head (team), HR (employee overview), Super Admin (company), plus summary.
 
 ### 5.8 Administration
-User and role assignment, audit log viewer, org settings, backup and monitoring plan.
+- **User and role assignment**: Manage HR and Department Heads, role transitions, and account status.
+- **Audit log viewer**: Search and filter critical system mutations with immutable change tracking.
+- **Organization Management (`/admin/organization`)**: Dedicated administration screen for Super Admins to manage dynamic work shifts, seasonal shift presets (Standard/Summer vs. Winter), shift start/end timings, late grace periods (minutes), and organization timezone (IANA). Changes propagate instantly across attendance check-ins, stopwatches, and daily derived absence status calculations without database restarts.
+- **Backup and monitoring plan**: Database snapshots, health endpoints, and audit retention.
 
 ### 5.9 UI/UX requirements
 - Dark theme by default (next-themes); light theme optional later.
