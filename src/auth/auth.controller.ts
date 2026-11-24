@@ -20,6 +20,7 @@ import {
   verifyOtpSchema,
   resetPasswordSchema,
 } from './dto/reset-password.dto.js';
+import { changePasswordSchema } from './dto/change-password.dto.js';
 
 @Controller('auth')
 export class AuthController {
@@ -284,6 +285,36 @@ export class AuthController {
         path: '/api/v1/auth/reset-password',
       });
     }
+
+    return {
+      success: true,
+      message: result.message,
+      data: null,
+      meta: null,
+    };
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const parseResult = changePasswordSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const callerUser = req.user!;
+    const result = await this.authService.changePassword(parseResult.data, callerUser);
 
     return {
       success: true,

@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, UnauthorizedException } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -7,15 +7,23 @@ import { AppModule } from '../src/app.module.js';
 import { AuthGuard } from '../src/auth/auth.guard.js';
 import { AuthService } from '../src/auth/auth.service.js';
 import { AUTH_CONSTANTS } from '../src/auth/auth.constants.js';
+import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter.js';
 
 describe('Manage HR & Department Head Endpoints (e2e)', () => {
   let app: INestApplication;
   let callerRole: string = 'super_admin';
+  let isUnauthenticated = false;
   const callerUserId = '60a30f3f-37ce-48e5-97dd-7bfc7ac8a065'; // admin@bistech.io
   const orgId = 'b3b2ea06-fe38-42b7-9122-4c037c8ead0f';
 
   const mockAuthGuard = {
     canActivate: (context: any) => {
+      if (isUnauthenticated) {
+        throw new UnauthorizedException({
+          code: 'UNAUTHENTICATED',
+          message: 'Authentication required',
+        });
+      }
       const req = context.switchToHttp().getRequest();
       req.user = {
         userId: callerUserId,
@@ -38,6 +46,7 @@ describe('Manage HR & Department Head Endpoints (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.use(cookieParser());
+    app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
   });
 
@@ -175,7 +184,7 @@ describe('Manage HR & Department Head Endpoints (e2e)', () => {
         .send({ roles: ['super_admin', 'hr_manager'] })
         .expect(403);
 
-      expect(res.body.code).toBe('SELF_MODIFICATION_NOT_ALLOWED');
+      expect(res.body.error?.code ?? res.body.code).toBe('SELF_MODIFICATION_NOT_ALLOWED');
     });
 
     it('updates another user roles successfully', async () => {
@@ -231,6 +240,122 @@ describe('Manage HR & Department Head Endpoints (e2e)', () => {
         .post('/auth/reset-password')
         .send({ newPassword: 'BrandNewSecurePass123!!' })
         .expect(401);
+    });
+
+    it('validates currentPassword when provided to reset-password', async () => {
+      const authService = app.get(AuthService);
+      const token = await authService.signAccessToken({
+        sub: callerUserId,
+        orgId,
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['super_admin'],
+      });
+
+      const failRes = await request(app.getHttpServer())
+        .post('/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          currentPassword: 'WrongPassword123!',
+          newPassword: 'BrandNewSecurePass123!!',
+        })
+        .expect(400);
+
+      expect(failRes.body.error.code).toBe('INVALID_CREDENTIALS');
+    });
+  });
+
+  describe('POST /auth/change-password', () => {
+    it('requires authentication', async () => {
+      isUnauthenticated = true;
+      try {
+        await request(app.getHttpServer())
+          .post('/auth/change-password')
+          .send({
+            currentPassword: 'Password123!',
+            newPassword: 'BrandNewSecurePass123!!',
+          })
+          .expect(401);
+      } finally {
+        isUnauthenticated = false;
+      }
+    });
+
+    it('rejects when current password is incorrect', async () => {
+      const authService = app.get(AuthService);
+      const token = await authService.signAccessToken({
+        sub: callerUserId,
+        orgId,
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['super_admin'],
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          currentPassword: 'IncorrectCurrentPass123!',
+          newPassword: 'BrandNewSecurePass123!!',
+        })
+        .expect(400);
+
+      expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
+      expect(res.body.error.message).toBe('Current password is incorrect');
+    });
+
+    it('rejects when new password matches current password', async () => {
+      const authService = app.get(AuthService);
+      const token = await authService.signAccessToken({
+        sub: callerUserId,
+        orgId,
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['super_admin'],
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          currentPassword: 'Password123!',
+          newPassword: 'Password123!',
+        })
+        .expect(400);
+
+      expect(res.body.error.code).toBe('BAD_REQUEST');
+      expect(res.body.error.message).toContain('cannot be the same');
+    });
+
+    it('successfully changes password and allows subsequent change back', async () => {
+      const authService = app.get(AuthService);
+      const token = await authService.signAccessToken({
+        sub: callerUserId,
+        orgId,
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['super_admin'],
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/change-password')
+        .set('Cookie', [`${AUTH_CONSTANTS.COOKIE_ACCESS_NAME}=${token}`])
+        .send({
+          currentPassword: 'Password123!',
+          newPassword: 'BrandNewSecurePass123!!',
+        })
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toBe('Password changed successfully');
+
+      // Revert password back
+      const revertRes = await request(app.getHttpServer())
+        .post('/auth/change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          currentPassword: 'BrandNewSecurePass123!!',
+          newPassword: 'Password123!',
+        })
+        .expect(200);
+
+      expect(revertRes.body.success).toBe(true);
     });
   });
 });
