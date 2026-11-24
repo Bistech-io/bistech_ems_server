@@ -787,6 +787,7 @@ export class TasksService {
   private mapReducedBoardCard(t: {
     id: string;
     title: string;
+    priority?: 'low' | 'medium' | 'high' | 'urgent';
     dueDate: Date | null;
     assignments: {
       status: string;
@@ -811,6 +812,7 @@ export class TasksService {
     return {
       id: t.id,
       title: t.title,
+      priority: t.priority ?? 'medium',
       status: boardStatus,
       dueDate: t.dueDate ? t.dueDate.toISOString().slice(0, 10) : null,
       assignees: activeAssignments.map((a) =>
@@ -861,6 +863,7 @@ export class TasksService {
       select: {
         id: true,
         title: true,
+        priority: true,
         dueDate: true,
         assignments: {
           where: { status: { not: 'cancelled' } },
@@ -955,6 +958,7 @@ export class TasksService {
       select: {
         id: true,
         title: true,
+        priority: true,
         dueDate: true,
         assignments: {
           where: { status: { not: 'cancelled' } },

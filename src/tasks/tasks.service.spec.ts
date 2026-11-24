@@ -463,6 +463,7 @@ describe('TasksService', () => {
           {
             id: TASK_ID,
             title: 'API audit',
+            priority: 'high',
             dueDate: new Date('2026-11-26T00:00:00Z'),
             assignments: [
               {
@@ -490,6 +491,7 @@ describe('TasksService', () => {
       {
         id: TASK_ID,
         title: 'API audit',
+        priority: 'high',
         status: 'in_progress',
         dueDate: '2026-11-26',
         assignees: ['Nadia Rahman'],
