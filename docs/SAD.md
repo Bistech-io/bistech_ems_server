@@ -64,7 +64,7 @@ OTP details: 6 digits from a CSPRNG (never `Math.random`); stored as HMAC-SHA256
 | Class | Examples | Who may read | Protection |
 |---|---|---|---|
 | Restricted | Password hashes, session/reset tokens, OTP hashes | Server only | Never returned or logged; hashed/HMAC |
-| Confidential | employee_profiles; feedback; comments; submission text | Profiles: `employee.read.sensitive` + owner. Feedback: submitter + Super Admin. Comments/submissions: people who can act on the task | Separate table + permission; non-owner reads audited; field allow-lists |
+| Confidential | users_info; employee_profiles; feedback; comments; submission text | Profiles: `employee.read.sensitive` + owner. Feedback: submitter + Super Admin. Comments/submissions: people who can act on the task | Separate table + permission; non-owner reads audited; field allow-lists |
 | Internal | Work profile, attendance, task titles/status | Scope rules | Scope filtering, pagination |
 | Public to staff | Holidays, department names, designations | Authenticated users | Authentication only |
 

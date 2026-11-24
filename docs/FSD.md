@@ -415,6 +415,7 @@ Counts filtered by caller scope; "today" uses org timezone; one shared implement
 | holidays | id, organization_id, holiday_date, name | unique (org, holiday_date) |
 | employees | id, organization_id, user_id, employee_code, first_name, last_name, work_email, phone, department_id, designation_id, employment_type, employment_status, joining_date, exit_date | unique (org, employee_code) and (org, lower(work_email)); unique user_id; inactive requires exit_date >= joining_date; no manager_id |
 | employee_profiles | employee_id, date_of_birth, personal_email, personal_phone, address_line, city, country_code, emergency_contact_* | one row per employee; sensitive |
+| users_info | id, user_id, organization_id, personal_email, personal_phone, date_of_birth, address_line, city, country_code, emergency_contact_* | one row per user; sensitive personal details |
 | employee_employment_history | id, employee_id, event_type, effective_date, old_value, new_value, reason, changed_by | append-only |
 | attendance_records | id, employee_id, work_date, check_in_at, status, source, late_minutes | unique (employee_id, work_date); no check_out/worked_minutes |
 | attendance_corrections | id, employee_id, attendance_record_id (nullable), work_date, corrected_check_in_at, corrected_status, reason, original_snapshot JSONB, corrected_by | append-only; reason 10 to 500 |
