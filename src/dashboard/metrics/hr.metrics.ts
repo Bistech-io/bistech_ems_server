@@ -54,6 +54,7 @@ export interface ComputeHrDashboardInput {
   employees: RawHrEmployeeRow[];
   holidayDates: Date[];
   monthAttendanceRows: (StoredAttendanceRow & { employeeId: string })[];
+  firstCheckInByEmployee?: Map<string, Date>;
   taskAssignments: RawOrgTaskAssignmentRow[];
   openFeedbackCount: number;
   auditLogs: RawOrgAuditLogRow[];
@@ -145,6 +146,7 @@ export function computeHrDashboardMetrics(
     const empRows = rowsByEmployee.get(emp.id) ?? [];
     const todayStoredRow =
       empRows.find((r) => toIsoDateString(r.workDate) === todayDateStr) ?? null;
+    const firstCheckIn = input.firstCheckInByEmployee?.get(emp.id) ?? null;
 
     const board = buildAttendanceBoard({
       now: input.now,
@@ -153,6 +155,7 @@ export function computeHrDashboardMetrics(
       from: monthStart,
       to: todayDateStr,
       joiningDate: toIsoDateString(emp.joiningDate),
+      firstCheckInDate: firstCheckIn ? toIsoDateString(firstCheckIn) : null,
       exitDate: emp.exitDate ? toIsoDateString(emp.exitDate) : null,
       isEmployeeActive: emp.employmentStatus === 'active',
       holidayDates: holidaySet,

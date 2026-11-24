@@ -290,6 +290,56 @@ export class AttendanceRepository {
     });
   }
 
+  async findFirstCheckInDate(
+    organizationId: string,
+    employeeId: string,
+  ): Promise<Date | null> {
+    const row = await this.prisma.attendanceRecord.findFirst({
+      where: {
+        organizationId,
+        employeeId,
+        OR: [
+          { checkInAt: { not: null } },
+          { status: { in: ['present', 'late'] } },
+        ],
+      },
+      orderBy: { workDate: 'asc' },
+      select: { workDate: true },
+    });
+
+    return row?.workDate ?? null;
+  }
+
+  async findFirstCheckInDatesForEmployees(
+    organizationId: string,
+    employeeIds: string[],
+  ): Promise<Map<string, Date>> {
+    if (employeeIds.length === 0) {
+      return new Map();
+    }
+
+    const groups = await this.prisma.attendanceRecord.groupBy({
+      by: ['employeeId'],
+      where: {
+        organizationId,
+        employeeId: { in: employeeIds },
+        OR: [
+          { checkInAt: { not: null } },
+          { status: { in: ['present', 'late'] } },
+        ],
+      },
+      _min: { workDate: true },
+    });
+
+    const map = new Map<string, Date>();
+    for (const group of groups) {
+      if (group._min.workDate) {
+        map.set(group.employeeId, group._min.workDate);
+      }
+    }
+    return map;
+  }
+
   async findStoredRecordById(
     organizationId: string,
     recordId: string,
