@@ -26,6 +26,8 @@ function createMockRepo(overrides: Partial<AttendanceRepository> = {}): Attendan
     findHolidayDates: vi.fn().mockResolvedValue([]),
     findRecordsInRange: vi.fn().mockResolvedValue([]),
     findRecordByDate: vi.fn().mockResolvedValue(null),
+    findFirstCheckInDate: vi.fn().mockResolvedValue(null),
+    findFirstCheckInDatesForEmployees: vi.fn().mockResolvedValue(new Map()),
     createWebCheckIn: vi.fn().mockImplementation(async (input) => ({
       id: 'att-1',
       workDate: new Date(`${input.workDateIso}T00:00:00Z`),
@@ -143,6 +145,9 @@ describe('AttendanceService', () => {
           note: null,
         },
       ]),
+      findFirstCheckInDatesForEmployees: vi
+        .fn()
+        .mockResolvedValue(new Map([[EMP_ID, new Date('2026-11-10T00:00:00Z')]])),
     });
     const service = new AttendanceService(repo);
     const hrCaller = {

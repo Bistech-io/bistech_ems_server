@@ -79,6 +79,10 @@ describe('computeHrDashboardMetrics', () => {
           note: null,
         },
       ],
+      firstCheckInByEmployee: new Map([
+        ['emp-1', new Date('2026-11-16T00:00:00Z')],
+        ['emp-2', new Date('2026-11-16T00:00:00Z')],
+      ]),
       taskAssignments: [
         { status: 'todo', dueDate: new Date('2026-11-17T00:00:00Z') }, // overdue
         { status: 'in_progress', dueDate: new Date('2026-11-20T00:00:00Z') }, // due soon

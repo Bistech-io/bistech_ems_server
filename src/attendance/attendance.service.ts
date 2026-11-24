@@ -135,7 +135,7 @@ export class AttendanceService {
     const from = query.from ?? getMonthStartIso(todayDateStr);
     const to = query.to ?? todayDateStr;
 
-    const [holidays, storedRows, todayStoredRow] = await Promise.all([
+    const [holidays, storedRows, todayStoredRow, firstCheckInDate] = await Promise.all([
       this.attendanceRepo.findHolidayDates(organizationId, from, to),
       this.attendanceRepo.findRecordsInRange(
         organizationId,
@@ -148,6 +148,7 @@ export class AttendanceService {
         context.employeeId,
         todayDateStr,
       ),
+      this.attendanceRepo.findFirstCheckInDate(organizationId, context.employeeId),
     ]);
 
     const holidayDates = new Set(holidays.map(toIsoDateString));
@@ -158,6 +159,7 @@ export class AttendanceService {
       from,
       to,
       joiningDate: toIsoDateString(context.joiningDate),
+      firstCheckInDate: firstCheckInDate ? toIsoDateString(firstCheckInDate) : null,
       exitDate: context.exitDate ? toIsoDateString(context.exitDate) : null,
       isEmployeeActive: context.employmentStatus === 'active',
       holidayDates,
@@ -250,13 +252,17 @@ export class AttendanceService {
     }
 
     const employeeIds = employees.map((e) => e.id);
-    const [holidays, storedRows] = await Promise.all([
+    const [holidays, storedRows, firstCheckInByEmployee] = await Promise.all([
       this.attendanceRepo.findHolidayDates(caller.organizationId, from, to),
       this.attendanceRepo.findRecordsInRangeForEmployees(
         caller.organizationId,
         employeeIds,
         from,
         to,
+      ),
+      this.attendanceRepo.findFirstCheckInDatesForEmployees(
+        caller.organizationId,
+        employeeIds,
       ),
     ]);
 
@@ -273,6 +279,7 @@ export class AttendanceService {
       const empRows = rowsByEmployee.get(emp.id) ?? [];
       const todayStoredRow =
         empRows.find((r) => toIsoDateString(r.workDate) === todayDateStr) ?? null;
+      const firstCheckIn = firstCheckInByEmployee.get(emp.id) ?? null;
 
       const board = buildAttendanceBoard({
         now,
@@ -281,6 +288,7 @@ export class AttendanceService {
         from,
         to,
         joiningDate: toIsoDateString(emp.joiningDate),
+        firstCheckInDate: firstCheckIn ? toIsoDateString(firstCheckIn) : null,
         exitDate: emp.exitDate ? toIsoDateString(emp.exitDate) : null,
         isEmployeeActive: emp.employmentStatus === 'active',
         holidayDates,
@@ -358,13 +366,17 @@ export class AttendanceService {
     );
 
     const employeeIds = employees.map((e) => e.id);
-    const [holidays, storedRows] = await Promise.all([
+    const [holidays, storedRows, firstCheckInByEmployee] = await Promise.all([
       this.attendanceRepo.findHolidayDates(caller.organizationId, from, to),
       this.attendanceRepo.findRecordsInRangeForEmployees(
         caller.organizationId,
         employeeIds,
         from,
         to,
+      ),
+      this.attendanceRepo.findFirstCheckInDatesForEmployees(
+        caller.organizationId,
+        employeeIds,
       ),
     ]);
 
@@ -385,6 +397,7 @@ export class AttendanceService {
       const empRows = rowsByEmployee.get(emp.id) ?? [];
       const todayStoredRow =
         empRows.find((r) => toIsoDateString(r.workDate) === todayDateStr) ?? null;
+      const firstCheckIn = firstCheckInByEmployee.get(emp.id) ?? null;
 
       const board = buildAttendanceBoard({
         now,
@@ -393,6 +406,7 @@ export class AttendanceService {
         from,
         to,
         joiningDate: toIsoDateString(emp.joiningDate),
+        firstCheckInDate: firstCheckIn ? toIsoDateString(firstCheckIn) : null,
         exitDate: emp.exitDate ? toIsoDateString(emp.exitDate) : null,
         isEmployeeActive: emp.employmentStatus === 'active',
         holidayDates,
