@@ -13,7 +13,8 @@ export const feedbackStatusSchema = z.enum(['open', 'in_review', 'resolved', 'cl
 
 export const createFeedbackSchema = z
   .object({
-    kind: feedbackKindSchema,
+    isNotice: z.boolean().default(false),
+    kind: feedbackKindSchema.default('suggestion'),
     category: feedbackCategorySchema.default('general'),
     subject: z
       .string()
@@ -30,7 +31,14 @@ export const createFeedbackSchema = z
 
 export type CreateFeedbackDto = z.infer<typeof createFeedbackSchema>;
 
+const optionalBooleanQuerySchema = z.preprocess((val) => {
+  if (val === 'true' || val === true) return true;
+  if (val === 'false' || val === false) return false;
+  return val;
+}, z.boolean().optional());
+
 export const listFeedbackQuerySchema = z.object({
+  isNotice: optionalBooleanQuerySchema,
   kind: feedbackKindSchema.optional(),
   category: feedbackCategorySchema.optional(),
   status: feedbackStatusSchema.optional(),

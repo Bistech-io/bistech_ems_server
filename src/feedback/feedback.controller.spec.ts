@@ -54,6 +54,7 @@ describe('FeedbackController (HTTP)', () => {
         id: FEEDBACK_ID,
         organizationId: ORG_ID,
         submittedBy: EMP_USER_ID,
+        isNotice: false,
         kind: 'issue',
         category: 'workplace',
         subject: 'WiFi drops on 3rd floor',
@@ -82,14 +83,16 @@ describe('FeedbackController (HTTP)', () => {
           storedRows.filter(
             (r) =>
               r.organizationId === where.organizationId &&
-              (!where.kind || r.kind === where.kind),
+              (!where.kind || r.kind === where.kind) &&
+              (where.isNotice === undefined || r.isNotice === where.isNotice),
           ).length,
         ),
         findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
           storedRows.filter(
             (r) =>
               r.organizationId === where.organizationId &&
-              (!where.kind || r.kind === where.kind),
+              (!where.kind || r.kind === where.kind) &&
+              (where.isNotice === undefined || r.isNotice === where.isNotice),
           ),
         ),
         findFirst: vi.fn(
@@ -119,6 +122,7 @@ describe('FeedbackController (HTTP)', () => {
                 id: '77777777-7777-7777-7777-777777777777',
                 organizationId: data.organizationId,
                 submittedBy: data.submittedBy,
+                isNotice: Boolean(data.isNotice),
                 kind: data.kind,
                 category: data.category,
                 subject: data.subject,
@@ -377,5 +381,39 @@ describe('FeedbackController (HTTP)', () => {
       .expect(200);
 
     expect(delRes.body.data.id).toBe(commentId);
+  });
+
+  it('enforces notice creation permissions (403 for employee, 201 for dept_head/hr/super_admin) and filters ?isNotice=true', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/feedback')
+      .set('x-test-role', 'employee')
+      .send({
+        isNotice: true,
+        subject: 'Unauthorized employee notice',
+        body: 'Employees should not be allowed to pin official notices.',
+      })
+      .expect(403);
+
+    const noticeRes = await request(app.getHttpServer())
+      .post('/api/v1/feedback')
+      .set('x-test-role', 'other_dept_head')
+      .send({
+        isNotice: true,
+        category: 'general',
+        subject: 'Townhall Meeting Friday 4PM',
+        body: 'All teams please join the Q4 townhall meeting in the main hall.',
+      })
+      .expect(201);
+
+    expect(noticeRes.body.data.isNotice).toBe(true);
+
+    // Every employee can read notices on the board and filter by isNotice
+    const noticesOnly = await request(app.getHttpServer())
+      .get('/api/v1/feedback?isNotice=true')
+      .set('x-test-role', 'employee')
+      .expect(200);
+
+    expect(noticesOnly.body.data).toHaveLength(1);
+    expect(noticesOnly.body.data[0].isNotice).toBe(true);
   });
 });

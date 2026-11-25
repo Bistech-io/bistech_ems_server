@@ -28,6 +28,7 @@ function makeFeedbackRow(overrides: Record<string, unknown> = {}) {
     id: FEEDBACK_ID,
     organizationId: ORG_ID,
     submittedBy: USER_EMP_ID,
+    isNotice: false,
     kind: 'issue',
     category: 'workplace',
     subject: 'AC temperature in Zone B',
@@ -64,6 +65,7 @@ describe('FeedbackService', () => {
     const service = new FeedbackService(prisma);
     const result = await service.createFeedback(
       {
+        isNotice: false,
         kind: 'issue',
         category: 'workplace',
         subject: 'AC temperature in Zone B',
@@ -102,6 +104,7 @@ describe('FeedbackService', () => {
     await expect(
       service.createFeedback(
         {
+          isNotice: false,
           kind: 'suggestion',
           category: 'general',
           subject: 'Add standing desks',
@@ -316,5 +319,52 @@ describe('FeedbackService', () => {
     await expect(
       service.deleteComment(FEEDBACK_ID, commentId, EMPLOYEE_CALLER),
     ).resolves.toEqual({ id: commentId });
+  });
+
+  it('allows super_admin, hr_manager, and dept_head to post notices and rejects regular employees with 403', async () => {
+    const createMock = vi.fn().mockResolvedValue(makeFeedbackRow({ isNotice: true }));
+    const prisma = {
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          feedbackItem: { create: createMock },
+          auditLog: { create: vi.fn().mockResolvedValue({}) },
+        }),
+      ),
+    } as unknown as PrismaService;
+
+    const service = new FeedbackService(prisma);
+    const noticeDto = {
+      isNotice: true,
+      kind: 'suggestion' as const,
+      category: 'general' as const,
+      subject: 'Office Closed This Friday',
+      body: 'All offices will be closed this Friday for annual maintenance.',
+    };
+
+    await expect(service.createFeedback(noticeDto, EMPLOYEE_CALLER)).rejects.toThrow(
+      ForbiddenException,
+    );
+
+    const hrCaller: AuthenticatedUser = {
+      userId: '55555555-5555-5555-5555-555555555555',
+      organizationId: ORG_ID,
+      sessionId: 'sess-hr',
+      roles: ['hr_manager'],
+    };
+    const deptHeadCaller: AuthenticatedUser = {
+      userId: '66666666-6666-6666-6666-666666666666',
+      organizationId: ORG_ID,
+      sessionId: 'sess-head',
+      roles: ['dept_head'],
+    };
+
+    const adminRes = await service.createFeedback(noticeDto, ADMIN_CALLER);
+    expect(adminRes).toMatchObject({ isNotice: true });
+
+    const hrRes = await service.createFeedback(noticeDto, hrCaller);
+    expect(hrRes).toMatchObject({ isNotice: true });
+
+    const headRes = await service.createFeedback(noticeDto, deptHeadCaller);
+    expect(headRes).toMatchObject({ isNotice: true });
   });
 });

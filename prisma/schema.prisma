@@ -688,6 +688,7 @@ model FeedbackItem {
   id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String           @map("organization_id") @db.Uuid
   submittedBy    String           @map("submitted_by") @db.Uuid
+  isNotice       Boolean          @default(false) @map("is_notice")
   kind           FeedbackKind
   category       FeedbackCategory
   subject        String           @db.Text
@@ -704,6 +705,7 @@ model FeedbackItem {
   comments  FeedbackComment[]
 
   @@unique([organizationId, id])
+  @@index([organizationId, isNotice, createdAt(sort: Desc)])
   @@index([organizationId, status, createdAt(sort: Desc)])
   @@index([submittedBy, createdAt(sort: Desc)])
   @@map("feedback_items")
