@@ -67,10 +67,9 @@ export class FeedbackService {
     if (idempotencyKey) {
       const existingKey = await this.prisma.idempotencyKey.findUnique({
         where: {
-          organizationId_actorUserId_scope_key: {
+          organizationId_userId_key: {
             organizationId: orgId,
-            actorUserId: caller.userId,
-            scope: 'feedback.create',
+            userId: caller.userId,
             key: idempotencyKey,
           },
         },
@@ -125,12 +124,11 @@ export class FeedbackService {
         await tx.idempotencyKey.create({
           data: {
             organizationId: orgId,
-            actorUserId: caller.userId,
-            scope: 'feedback.create',
+            userId: caller.userId,
             key: idempotencyKey,
             requestHash,
             responseStatus: 201,
-            responseBody: responseData,
+            responseBody: responseData as object,
             expiresAt,
           },
         });
