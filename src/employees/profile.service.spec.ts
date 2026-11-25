@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import type { PrismaService } from '../database/prisma.service.js';
@@ -150,12 +150,74 @@ describe('ProfileService', () => {
     });
   });
 
-  it('rejects non-HR employee attempting to update profile with 403 FORBIDDEN', async () => {
-    const prisma = {} as unknown as PrismaService;
+  it('allows owner employee to update their own personal profile via updateMySensitiveProfile', async () => {
+    const upsert = vi.fn().mockResolvedValue({
+      ...makeEmployeeRow().profile,
+      city: 'Sylhet',
+    });
+    const auditCreate = vi.fn().mockResolvedValue({});
+    const prisma = {
+      employee: {
+        findFirst: vi.fn().mockResolvedValue({ id: EMP_ID }),
+      },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          employee: { findUnique: vi.fn().mockResolvedValue(makeEmployeeRow()) },
+          employeeProfile: { upsert },
+          auditLog: { create: auditCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+
+    const service = new ProfileService(prisma);
+    const updated = await service.updateMySensitiveProfile(
+      { city: 'Sylhet' },
+      OWNER_CALLER,
+    );
+
+    expect(updated.city).toBe('Sylhet');
+    expect(upsert).toHaveBeenCalled();
+    expect(auditCreate).toHaveBeenCalled();
+  });
+
+  it('rejects non-HR non-owner employee attempting to update another profile with 404 NOT_FOUND', async () => {
+    const prisma = {
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          employee: { findUnique: vi.fn().mockResolvedValue(makeEmployeeRow()) },
+        }),
+      ),
+    } as unknown as PrismaService;
     const service = new ProfileService(prisma);
 
     await expect(
-      service.updateSensitiveProfile(EMP_ID, { city: 'Sylhet' }, OWNER_CALLER),
-    ).rejects.toThrow(ForbiddenException);
+      service.updateSensitiveProfile(EMP_ID, { city: 'Sylhet' }, OTHER_EMPLOYEE_CALLER),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('correctly maps dynamic work shift settings from organization settings without dummy fallbacks', async () => {
+    const rowWithOrg = {
+      ...makeEmployeeRow(),
+      organization: {
+        name: 'BisTech Corp',
+        timezone: 'Asia/Dhaka',
+        settings: {
+          workStart: '10:00',
+          workEnd: '18:30',
+          graceMinutes: 20,
+        },
+      },
+    };
+    const prisma = {
+      employee: { findUnique: vi.fn().mockResolvedValue(rowWithOrg) },
+    } as unknown as PrismaService;
+    const service = new ProfileService(prisma);
+    const profile = await service.getSensitiveProfile(EMP_ID, OWNER_CALLER);
+
+    expect(profile.organizationName).toBe('BisTech Corp');
+    expect(profile.timezone).toBe('Asia/Dhaka');
+    expect(profile.workStart).toBe('10:00');
+    expect(profile.workEnd).toBe('18:30');
+    expect(profile.graceMinutes).toBe(20);
   });
 });

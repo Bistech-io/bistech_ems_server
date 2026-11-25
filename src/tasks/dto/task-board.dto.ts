@@ -18,7 +18,7 @@ export const departmentBoardQuerySchema = z.object({
 export type DepartmentBoardQueryDto = z.infer<typeof departmentBoardQuerySchema>;
 
 export const teamBoardQuerySchema = z.object({
-  teamId: z.string().uuid('teamId must be a valid UUID'),
+  teamId: z.string().uuid('teamId must be a valid UUID').optional(),
 });
 
 export type TeamBoardQueryDto = z.infer<typeof teamBoardQuerySchema>;

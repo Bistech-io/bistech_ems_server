@@ -12,11 +12,24 @@ export const updateOrganizationSettingsSchema = z
       .number()
       .int('graceMinutes must be an integer')
       .min(0, 'graceMinutes cannot be negative')
-      .max(120, 'graceMinutes cannot exceed 120 minutes')
+      .max(180, 'graceMinutes cannot exceed 180 minutes')
       .optional(),
     workEnd: z
       .string()
       .regex(timeRegex, 'workEnd must be in 24-hour HH:mm format (e.g. 18:00)')
+      .optional(),
+    timezone: z
+      .string()
+      .min(1, 'Timezone is required')
+      .max(100, 'Timezone cannot exceed 100 characters')
+      .refine((tz) => {
+        try {
+          Intl.DateTimeFormat(undefined, { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      }, 'Invalid IANA timezone identifier (e.g. Asia/Dhaka, UTC)')
       .optional(),
     weekendDays: z
       .array(

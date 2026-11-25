@@ -787,6 +787,7 @@ export class TasksService {
   private mapReducedBoardCard(t: {
     id: string;
     title: string;
+    priority?: 'low' | 'medium' | 'high' | 'urgent';
     dueDate: Date | null;
     assignments: {
       status: string;
@@ -811,6 +812,7 @@ export class TasksService {
     return {
       id: t.id,
       title: t.title,
+      priority: t.priority ?? 'medium',
       status: boardStatus,
       dueDate: t.dueDate ? t.dueDate.toISOString().slice(0, 10) : null,
       assignees: activeAssignments.map((a) =>
@@ -861,6 +863,7 @@ export class TasksService {
       select: {
         id: true,
         title: true,
+        priority: true,
         dueDate: true,
         assignments: {
           where: { status: { not: 'cancelled' } },
@@ -881,10 +884,38 @@ export class TasksService {
     const isDeptHead = caller.roles.includes('department_head');
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
+    let targetTeamId = query.teamId;
+    if (!targetTeamId) {
+      if (callerCtx.employeeId) {
+        const membership = await this.prisma.teamMember.findFirst({
+          where: {
+            organizationId: orgId,
+            employeeId: callerCtx.employeeId,
+            removedAt: null,
+            team: { archivedAt: null },
+          },
+          select: { teamId: true },
+        });
+        targetTeamId = membership?.teamId;
+      }
+
+      if (!targetTeamId && isSuperAdmin) {
+        const firstTeam = await this.prisma.team.findFirst({
+          where: { organizationId: orgId, archivedAt: null },
+          select: { id: true },
+        });
+        targetTeamId = firstTeam?.id;
+      }
+
+      if (!targetTeamId) {
+        return [];
+      }
+    }
+
     const team = await this.prisma.team.findFirst({
       where: {
         organizationId: orgId,
-        id: query.teamId,
+        id: targetTeamId,
         archivedAt: null,
       },
       select: {
@@ -927,6 +958,7 @@ export class TasksService {
       select: {
         id: true,
         title: true,
+        priority: true,
         dueDate: true,
         assignments: {
           where: { status: { not: 'cancelled' } },

@@ -123,6 +123,7 @@ export class OrganizationService {
       where: { id: organizationId },
       data: {
         settings: updatedSettings as Prisma.InputJsonValue,
+        ...(dto.timezone !== undefined ? { timezone: dto.timezone } : {}),
       },
     });
 
@@ -135,8 +136,14 @@ export class OrganizationService {
         entityType: 'organization',
         entityId: organizationId,
         metadata: {
-          previous: currentSettings,
-          updated: updatedSettings,
+          previous: {
+            ...currentSettings,
+            timezone: org.timezone,
+          },
+          updated: {
+            ...updatedSettings,
+            timezone: updatedOrg.timezone,
+          },
         } as Prisma.InputJsonValue,
       },
     });

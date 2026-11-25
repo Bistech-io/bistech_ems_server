@@ -287,6 +287,50 @@ export class DashboardRepository {
     });
   }
 
+  async findFirstCheckInDate(
+    organizationId: string,
+    employeeId: string,
+  ): Promise<Date | null> {
+    const row = await this.prisma.attendanceRecord.findFirst({
+      where: {
+        organizationId,
+        employeeId,
+        OR: [
+          { checkInAt: { not: null } },
+          { status: { in: ['present', 'late'] } },
+        ],
+      },
+      orderBy: { workDate: 'asc' },
+      select: { workDate: true },
+    });
+
+    return row?.workDate ?? null;
+  }
+
+  async findOrgFirstCheckInDates(
+    organizationId: string,
+  ): Promise<Map<string, Date>> {
+    const groups = await this.prisma.attendanceRecord.groupBy({
+      by: ['employeeId'],
+      where: {
+        organizationId,
+        OR: [
+          { checkInAt: { not: null } },
+          { status: { in: ['present', 'late'] } },
+        ],
+      },
+      _min: { workDate: true },
+    });
+
+    const map = new Map<string, Date>();
+    for (const group of groups) {
+      if (group._min.workDate) {
+        map.set(group.employeeId, group._min.workDate);
+      }
+    }
+    return map;
+  }
+
   async findOrgTaskAssignments(
     organizationId: string,
   ): Promise<RawOrgTaskAssignmentRow[]> {

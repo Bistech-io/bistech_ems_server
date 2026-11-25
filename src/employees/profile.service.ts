@@ -1,5 +1,4 @@
 import {
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,6 +14,117 @@ import {
 export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getMySensitiveProfile(
+    caller: AuthenticatedUser,
+  ): Promise<SensitiveEmployeeProfileDto> {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+      },
+      include: {
+        organization: { select: { name: true, timezone: true, settings: true } },
+        department: { select: { id: true, name: true } },
+        designation: { select: { id: true, title: true } },
+        profile: true,
+      },
+    });
+
+    if (!employee) {
+      const [user, userInfo] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: caller.userId },
+          include: { organization: { select: { name: true, timezone: true, settings: true } } },
+        }),
+        this.prisma.userInfo?.findUnique({
+          where: { userId: caller.userId },
+        }),
+      ]);
+
+      if (!user) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'User record not found',
+        });
+      }
+
+      return toSensitiveProfileDto({
+        id: user.id,
+        userId: user.id,
+        employeeCode: '—',
+        firstName: user.displayName || user.username,
+        lastName: '',
+        workEmail: user.email,
+        employmentStatus: 'active',
+        organization: user.organization,
+        department: { id: '', name: 'Management' },
+        designation: { id: '', title: caller.roles[0] || 'Administrator' },
+        profile: (userInfo as any) ?? null,
+      });
+    }
+
+    const userInfo = await this.prisma.userInfo?.findUnique({
+      where: { userId: caller.userId },
+    });
+
+    return toSensitiveProfileDto({
+      ...employee,
+      profile: (userInfo as any) ?? employee.profile,
+    });
+  }
+
+  async updateMySensitiveProfile(
+    dto: UpdateEmployeeProfileDto,
+    caller: AuthenticatedUser,
+  ): Promise<SensitiveEmployeeProfileDto> {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+      },
+      select: { id: true },
+    });
+
+    if (employee) {
+      return this.updateSensitiveProfile(employee.id, dto, caller);
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (dto.dateOfBirth !== undefined) {
+      updateData.dateOfBirth = dto.dateOfBirth
+        ? new Date(`${dto.dateOfBirth}T00:00:00Z`)
+        : null;
+    }
+    if (dto.personalEmail !== undefined) updateData.personalEmail = dto.personalEmail;
+    if (dto.personalPhone !== undefined) updateData.personalPhone = dto.personalPhone;
+    if (dto.addressLine !== undefined) updateData.addressLine = dto.addressLine;
+    if (dto.city !== undefined) updateData.city = dto.city;
+    if (dto.countryCode !== undefined) updateData.countryCode = dto.countryCode;
+    if (dto.emergencyContactName !== undefined) {
+      updateData.emergencyContactName = dto.emergencyContactName;
+    }
+    if (dto.emergencyContactPhone !== undefined) {
+      updateData.emergencyContactPhone = dto.emergencyContactPhone;
+    }
+    if (dto.emergencyContactRelation !== undefined) {
+      updateData.emergencyContactRelation = dto.emergencyContactRelation;
+    }
+
+    if (this.prisma.userInfo) {
+      await this.prisma.userInfo.upsert({
+        where: { userId: caller.userId },
+        update: updateData,
+        create: {
+          userId: caller.userId,
+          organizationId: caller.organizationId,
+          ...updateData,
+        },
+      });
+    }
+
+    return this.getMySensitiveProfile(caller);
+  }
+
   async getSensitiveProfile(
     employeeId: string,
     caller: AuthenticatedUser,
@@ -27,6 +137,7 @@ export class ProfileService {
         },
       },
       include: {
+        organization: { select: { name: true, timezone: true, settings: true } },
         department: { select: { id: true, name: true } },
         designation: { select: { id: true, title: true } },
         profile: true,
@@ -68,7 +179,14 @@ export class ProfileService {
       });
     }
 
-    return toSensitiveProfileDto(employee);
+    const userInfo = await this.prisma.userInfo?.findUnique({
+      where: { userId: employee.userId },
+    });
+
+    return toSensitiveProfileDto({
+      ...employee,
+      profile: userInfo ?? employee.profile,
+    });
   }
 
   async updateSensitiveProfile(
@@ -79,13 +197,6 @@ export class ProfileService {
     const isHrOrAdmin =
       caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
 
-    if (!isHrOrAdmin) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can update employee personal profiles',
-      });
-    }
-
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findUnique({
         where: {
@@ -95,12 +206,21 @@ export class ProfileService {
           },
         },
         include: {
+          organization: { select: { name: true, timezone: true, settings: true } },
           department: { select: { id: true, name: true } },
           designation: { select: { id: true, title: true } },
         },
       });
 
       if (!employee) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Employee record not found',
+        });
+      }
+
+      const isOwner = employee.userId === caller.userId;
+      if (!isHrOrAdmin && !isOwner) {
         throw new NotFoundException({
           code: 'NOT_FOUND',
           message: 'Employee record not found',
@@ -126,6 +246,18 @@ export class ProfileService {
       }
       if (dto.emergencyContactRelation !== undefined) {
         updateData.emergencyContactRelation = dto.emergencyContactRelation;
+      }
+
+      if (tx.userInfo) {
+        await tx.userInfo.upsert({
+          where: { userId: employee.userId },
+          update: updateData,
+          create: {
+            userId: employee.userId,
+            organizationId: caller.organizationId,
+            ...updateData,
+          },
+        });
       }
 
       const profile = await tx.employeeProfile.upsert({

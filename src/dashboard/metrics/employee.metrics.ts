@@ -56,6 +56,7 @@ export interface ComputeEmployeeDashboardInput {
   holidayDates: Date[];
   monthAttendanceRows: StoredAttendanceRow[];
   todayAttendanceRow: StoredAttendanceRow | null;
+  firstCheckInDate?: Date | null;
   taskAssignments: RawTaskAssignmentRow[];
   openFeedbackCount: number;
   notifications: RawNotificationRow[];
@@ -87,6 +88,7 @@ export function computeEmployeeDashboardMetrics(
     from: monthStart,
     to: todayDateStr,
     joiningDate: toIsoDateString(input.profile.joiningDate),
+    firstCheckInDate: input.firstCheckInDate ? toIsoDateString(input.firstCheckInDate) : null,
     exitDate: input.profile.exitDate ? toIsoDateString(input.profile.exitDate) : null,
     isEmployeeActive: input.profile.employmentStatus === 'active',
     holidayDates: new Set(input.holidayDates.map(toIsoDateString)),

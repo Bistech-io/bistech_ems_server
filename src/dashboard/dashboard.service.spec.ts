@@ -56,6 +56,8 @@ function createMockRepo(overrides: Partial<DashboardRepository> = {}): Dashboard
     findOrgDepartments: vi.fn().mockResolvedValue([{ id: 'dept-1', name: 'Engineering' }]),
     findOrgEmployeesForHrDashboard: vi.fn().mockResolvedValue([]),
     findOrgAttendanceInRange: vi.fn().mockResolvedValue([]),
+    findFirstCheckInDate: vi.fn().mockResolvedValue(null),
+    findOrgFirstCheckInDates: vi.fn().mockResolvedValue(new Map()),
     findOrgTaskAssignments: vi.fn().mockResolvedValue([]),
     countOrgOpenFeedback: vi.fn().mockResolvedValue(3),
     findRecentOrgAuditLogs: vi.fn().mockResolvedValue([]),

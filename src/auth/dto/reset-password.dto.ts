@@ -26,6 +26,7 @@ export const resetPasswordSchema = z
       .min(8, 'Password must be at least 8 characters')
       .max(128, 'Password cannot exceed 128 characters'),
     resetToken: z.string().trim().min(1).optional(),
+    currentPassword: z.string().min(1).max(128).optional(),
   })
   .strict();
 

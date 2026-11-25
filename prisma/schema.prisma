@@ -154,6 +154,7 @@ model Organization {
   holidays      Holiday[]
   employees     Employee[]
   auditLogs     AuditLog[]
+  usersInfo     UserInfo[]
 
   @@map("organizations")
 }
@@ -176,6 +177,7 @@ model User {
   organization Organization @relation(fields: [organizationId], references: [id])
 
   employee                   Employee?
+  userInfo                   UserInfo?
   userRoles                  UserRole[]                   @relation("UserRolesTarget")
   userRolesAssigned          UserRole[]                   @relation("UserRoleAssigner")
   sessions                   UserSession[]
@@ -432,6 +434,29 @@ model EmployeeProfile {
 
   @@unique([organizationId, employeeId])
   @@map("employee_profiles")
+}
+
+model UserInfo {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                   String    @unique @map("user_id") @db.Uuid
+  organizationId           String    @map("organization_id") @db.Uuid
+  personalEmail            String?   @map("personal_email") @db.Text
+  personalPhone            String?   @map("personal_phone") @db.Text
+  dateOfBirth              DateTime? @map("date_of_birth") @db.Date
+  addressLine              String?   @map("address_line") @db.Text
+  city                     String?   @db.Text
+  countryCode              String?   @map("country_code") @db.Char(2)
+  emergencyContactName     String?   @map("emergency_contact_name") @db.Text
+  emergencyContactPhone    String?   @map("emergency_contact_phone") @db.Text
+  emergencyContactRelation String?   @map("emergency_contact_relation") @db.Text
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt                DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user         User         @relation(fields: [organizationId, userId], references: [organizationId, id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("users_info")
 }
 
 model EmployeeEmploymentHistory {

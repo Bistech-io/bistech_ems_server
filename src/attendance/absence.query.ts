@@ -140,11 +140,33 @@ export interface BuildAttendanceBoardInput {
   from: string;
   to: string;
   joiningDate: string;
+  firstCheckInDate?: string | null;
   exitDate: string | null;
   isEmployeeActive: boolean;
   holidayDates: Set<string>;
   storedRows: StoredAttendanceRow[];
   todayStoredRow: StoredAttendanceRow | null;
+}
+
+function resolveEffectiveFirstCheckInDate(input: BuildAttendanceBoardInput): string | null {
+  let earliest: string | null = input.firstCheckInDate ?? null;
+
+  const consider = (row: StoredAttendanceRow | null) => {
+    if (!row) return;
+    if (row.checkInAt !== null || row.status === 'present' || row.status === 'late') {
+      const iso = toIsoDateString(row.workDate);
+      if (!earliest || iso < earliest) {
+        earliest = iso;
+      }
+    }
+  };
+
+  for (const row of input.storedRows) {
+    consider(row);
+  }
+  consider(input.todayStoredRow);
+
+  return earliest;
 }
 
 export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
@@ -159,6 +181,7 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
   const workEndMinutes = parseTimeToMinutes(input.settings.workEnd);
   const hasWorkDayEndedToday = nowMinutes >= workEndMinutes;
   const weekendSet = new Set(input.settings.weekendDays);
+  const effectiveFirstCheckInDate = resolveEffectiveFirstCheckInDate(input);
 
   const isWorkingDay = (isoDate: string): boolean => {
     const dow = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
@@ -167,8 +190,10 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
     return true;
   };
 
-  const isWithinEmployment = (isoDate: string): boolean => {
-    if (isoDate < input.joiningDate) return false;
+  // Attendance & absence tracking starts from the employee's first check-in date, not joiningDate
+  const isWithinTrackingWindow = (isoDate: string): boolean => {
+    if (!effectiveFirstCheckInDate) return false;
+    if (isoDate < effectiveFirstCheckInDate) return false;
     if (input.exitDate && isoDate > input.exitDate) return false;
     return true;
   };
@@ -186,7 +211,7 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
     };
   } else if (
     input.isEmployeeActive &&
-    isWithinEmployment(todayDateStr) &&
+    isWithinTrackingWindow(todayDateStr) &&
     isWorkingDay(todayDateStr) &&
     hasWorkDayEndedToday
   ) {
@@ -221,7 +246,7 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
   for (const isoDate of enumerateIsoDates(input.from, input.to)) {
     const stored = storedByDate.get(isoDate);
     const working = isWorkingDay(isoDate);
-    const employed = isWithinEmployment(isoDate);
+    const tracked = isWithinTrackingWindow(isoDate);
     const isPastDay = isoDate < todayDateStr;
     const isTodayEnded = isoDate === todayDateStr && hasWorkDayEndedToday;
 
@@ -241,13 +266,13 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
       else if (stored.status === 'late') lateDays += 1;
       else if (stored.status === 'absent') absentDays += 1;
 
-      if (working && employed && (isPastDay || isTodayEnded || stored.status !== 'absent')) {
+      if (working && tracked && (isPastDay || isTodayEnded || stored.status !== 'absent')) {
         expectedWorkingDays += 1;
       }
       continue;
     }
 
-    if (input.isEmployeeActive && working && employed && (isPastDay || isTodayEnded)) {
+    if (input.isEmployeeActive && working && tracked && (isPastDay || isTodayEnded)) {
       records.push({
         id: null,
         workDate: isoDate,

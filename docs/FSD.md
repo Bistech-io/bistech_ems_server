@@ -228,25 +228,43 @@ No `DELETE /employees/{id}`.
 | PATCH, DELETE | /designations/{id} | manage (DELETE archives) |
 | GET, POST | /holidays | read / manage (filter year) |
 | DELETE | /holidays/{id} | manage |
-| GET | /organization/settings | Authenticated (Super Admin, HR Manager, Dept Head, Employee): read workStart, graceMinutes, workEnd, weekendDays, timezone |
-| PATCH | /organization/settings | org.settings.manage (Super Admin, HR Manager): dynamically update workStart, graceMinutes, workEnd, weekendDays |
+| GET | /organization/settings | Authenticated (Super Admin, HR Manager, Dept Head, Employee): read workStart, graceMinutes, workEnd, weekendDays, timezone, name, slug |
+| PATCH | /organization/settings | org.settings.manage (Super Admin, HR Manager): dynamically update workStart, graceMinutes, workEnd, weekendDays, timezone |
 | GET, PATCH | /organization | org.settings.manage (name, timezone, work start, grace, work end, weekend days, employee code prefix) |
 
-#### Organization Work Schedule & Shift Settings (`/organization/settings`)
+#### Organization Work Schedule & Shift Settings (`/organization/settings` & `/admin/organization`)
 - **GET `/organization/settings`**:
   - **Permission**: Any authenticated session.
-  - **Returns**: `{ workStart: string, graceMinutes: number, workEnd: string, weekendDays: number[], timezone: string, name: string }`.
+  - **Returns**: `{ workStart: string, graceMinutes: number, workEnd: string, weekendDays: number[], timezone: string, name: string, slug: string }`.
 - **PATCH `/organization/settings`**:
   - **Permission**: `org.settings.manage` (granted to Super Admin and HR Manager).
   - **Payload**:
-    - `workStart` (optional): `HH:mm` format (`^([01]\\d|2[0-3]):[0-5]\\d$`), e.g. `"09:00"`.
-    - `graceMinutes` (optional): integer `0` to `120`, e.g. `15`.
-    - `workEnd` (optional): `HH:mm` format (`^([01]\\d|2[0-3]):[0-5]\\d$`), must be after `workStart`, e.g. `"18:00"`.
+    - `workStart` (optional): `HH:mm` 24-hour format (`^([01]\\d|2[0-3]):[0-5]\\d$`), e.g. `"09:00"`.
+    - `graceMinutes` (optional): integer `0` to `180` minutes, e.g. `15`.
+    - `workEnd` (optional): `HH:mm` 24-hour format (`^([01]\\d|2[0-3]):[0-5]\\d$`), must be strictly after `workStart`, e.g. `"18:00"`.
+    - `timezone` (optional): valid IANA timezone identifier string, e.g. `"Asia/Dhaka"` or `"UTC"`.
     - `weekendDays` (optional): array of ISO weekdays `1` (Monday) to `7` (Sunday), unique, non-empty, e.g. `[5, 6]`.
   - **Validation & Business Rules**:
-    - `workStart` must be strictly before `workEnd`.
-    - Updates are persisted into `organizations.settings` JSONB under tenant isolation.
-    - An audit entry is recorded in `audit_logs` (`action: "organization.settings.updated"`, `entityType: "organization"`).
+    - `workStart` must be strictly earlier than `workEnd`.
+    - `graceMinutes` must be an integer between `0` and `180`.
+    - `timezone` must pass standard IANA timezone validation (`Intl.DateTimeFormat(undefined, { timeZone })`).
+    - Updates to shift timings and weekend days are persisted into `organizations.settings` JSONB under tenant isolation.
+    - Updates to `timezone` are persisted directly to the `organizations.timezone` column.
+    - An audit entry is recorded in `audit_logs` (`action: "organization.settings.updated"`, `entityType: "organization"`), capturing previous and updated snapshots including `timezone`.
+    - Changes take effect immediately across check-ins, live timers, stopwatches, and dynamic attendance absence calculations.
+- **UI Screen (`/admin/organization`)**:
+  - Protected by `<RoleGuard allowedRoles={['super_admin']}>` and `org.settings.manage`.
+  - **Top Navigation Banner**: Displays dynamic pill badge: `Active Shift: {workStart} - {workEnd}` formatted in 12-hour AM/PM.
+  - **Dynamic Work Shift Settings Card**:
+    - Seasonal presets:
+      - Standard / Summer Shift: 10:00 AM – 06:00 PM (`10:00` - `18:00`)
+      - Winter Shift: 09:00 AM – 05:00 PM (`09:00` - `17:00`)
+    - Custom Inputs: Shift Start Time (`workStart`), Shift End Time (`workEnd`), Late Grace Period (`graceMinutes`), Organization Timezone (`timezone`).
+    - Error & Feedback banners: Displays API error reasons clearly when validation fails, or green confirmation banner upon successful update.
+  - **Active Schedule Summary Card**:
+    - Shift Window: `{workStart} - {workEnd}` (12-hour AM/PM format).
+    - Grace Period: `{graceMinutes} minutes`.
+    - Timezone: `{timezone}`.
 
 
 ### Users, roles, audit (Super Admin)
@@ -397,6 +415,7 @@ Counts filtered by caller scope; "today" uses org timezone; one shared implement
 | holidays | id, organization_id, holiday_date, name | unique (org, holiday_date) |
 | employees | id, organization_id, user_id, employee_code, first_name, last_name, work_email, phone, department_id, designation_id, employment_type, employment_status, joining_date, exit_date | unique (org, employee_code) and (org, lower(work_email)); unique user_id; inactive requires exit_date >= joining_date; no manager_id |
 | employee_profiles | employee_id, date_of_birth, personal_email, personal_phone, address_line, city, country_code, emergency_contact_* | one row per employee; sensitive |
+| users_info | id, user_id, organization_id, personal_email, personal_phone, date_of_birth, address_line, city, country_code, emergency_contact_* | one row per user; sensitive personal details |
 | employee_employment_history | id, employee_id, event_type, effective_date, old_value, new_value, reason, changed_by | append-only |
 | attendance_records | id, employee_id, work_date, check_in_at, status, source, late_minutes | unique (employee_id, work_date); no check_out/worked_minutes |
 | attendance_corrections | id, employee_id, attendance_record_id (nullable), work_date, corrected_check_in_at, corrected_status, reason, original_snapshot JSONB, corrected_by | append-only; reason 10 to 500 |

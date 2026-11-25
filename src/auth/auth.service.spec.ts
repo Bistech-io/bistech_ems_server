@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
+import { UnauthorizedException, UnprocessableEntityException, BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service.js';
@@ -17,6 +17,7 @@ describe('AuthService', () => {
       },
       user: {
         findUnique: vi.fn(),
+        findFirst: vi.fn(),
         update: vi.fn(),
       },
       userSession: {
@@ -387,6 +388,219 @@ describe('AuthService', () => {
           revokedReason: 'user_revoke',
         }),
       });
+    });
+
+    it('resets password for authenticated user (first-login/logged-in session)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      const result = await authService.resetPassword(
+        { newPassword: 'BrandNewPassword123!' },
+        undefined,
+        callerUser,
+      );
+
+      expect(result.message).toContain('Password reset successfully');
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: expect.objectContaining({
+          failedLoginCount: 0,
+          lockedUntil: null,
+          accountStatus: 'active',
+        }),
+      });
+      expect(mockPrisma.userSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          organizationId: 'org-1',
+          userId: 'user-1',
+          id: { not: 'a0000000-0000-0000-0000-000000000001' },
+          revokedAt: null,
+        },
+        data: expect.objectContaining({
+          revokedReason: 'password_reset',
+        }),
+      });
+    });
+
+    it('validates currentPassword in resetPassword when provided for authenticated user', async () => {
+      const oldHash = await argon2.hash('OldPassword123!', { type: argon2.argon2id });
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        passwordHash: oldHash,
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      // Fails with wrong currentPassword
+      await expect(
+        authService.resetPassword(
+          { currentPassword: 'WrongPassword!', newPassword: 'BrandNewPassword123!' },
+          undefined,
+          callerUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      // Succeeds with correct currentPassword
+      const result = await authService.resetPassword(
+        { currentPassword: 'OldPassword123!', newPassword: 'BrandNewPassword123!' },
+        undefined,
+        callerUser,
+      );
+      expect(result.message).toContain('Password reset successfully');
+    });
+  });
+
+  describe('changePassword', () => {
+    it('successfully changes password when currentPassword is correct', async () => {
+      const oldHash = await argon2.hash('CurrentSecret123!', { type: argon2.argon2id });
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        username: 'johndoe',
+        name: 'John Doe',
+        email: 'john@bistech.com',
+        passwordHash: oldHash,
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      const result = await authService.changePassword(
+        {
+          currentPassword: 'CurrentSecret123!',
+          newPassword: 'BrandNewSuperSecurePass456!',
+        },
+        callerUser,
+      );
+
+      expect(result.message).toBe('Password changed successfully');
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: expect.objectContaining({
+          failedLoginCount: 0,
+          lockedUntil: null,
+          accountStatus: 'active',
+        }),
+      });
+      expect(mockPrisma.userSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          organizationId: 'org-1',
+          userId: 'user-1',
+          id: { not: 'a0000000-0000-0000-0000-000000000001' },
+          revokedAt: null,
+        },
+        data: expect.objectContaining({
+          revokedReason: 'password_reset',
+        }),
+      });
+    });
+
+    it('rejects with INVALID_CREDENTIALS when current password is incorrect', async () => {
+      const oldHash = await argon2.hash('CurrentSecret123!', { type: argon2.argon2id });
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        username: 'johndoe',
+        passwordHash: oldHash,
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      await expect(
+        authService.changePassword(
+          {
+            currentPassword: 'WrongPassword!',
+            newPassword: 'BrandNewSuperSecurePass456!',
+          },
+          callerUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when new password matches current password', async () => {
+      const oldHash = await argon2.hash('CurrentSecret123!', { type: argon2.argon2id });
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        username: 'johndoe',
+        passwordHash: oldHash,
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      await expect(
+        authService.changePassword(
+          {
+            currentPassword: 'CurrentSecret123!',
+            newPassword: 'CurrentSecret123!',
+          },
+          callerUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when new password contains user identity tokens', async () => {
+      const oldHash = await argon2.hash('CurrentSecret123!', { type: argon2.argon2id });
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        organizationId: 'org-1',
+        username: 'johndoe',
+        name: 'John Doe',
+        email: 'john@bistech.com',
+        passwordHash: oldHash,
+        accountStatus: 'active',
+      });
+
+      const callerUser = {
+        userId: 'user-1',
+        organizationId: 'org-1',
+        sessionId: 'a0000000-0000-0000-0000-000000000001',
+        roles: ['employee'],
+      };
+
+      await expect(
+        authService.changePassword(
+          {
+            currentPassword: 'CurrentSecret123!',
+            newPassword: 'SecretJohnPass123!',
+          },
+          callerUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

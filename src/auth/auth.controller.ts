@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
-import { AuthGuard } from './auth.guard.js';
+import { AuthGuard, type AuthenticatedUser } from './auth.guard.js';
 import { AUTH_CONSTANTS } from './auth.constants.js';
 import { loginSchema, LoginDto } from './dto/login.dto.js';
 import {
@@ -20,6 +20,7 @@ import {
   verifyOtpSchema,
   resetPasswordSchema,
 } from './dto/reset-password.dto.js';
+import { changePasswordSchema } from './dto/change-password.dto.js';
 
 @Controller('auth')
 export class AuthController {
@@ -249,12 +250,71 @@ export class AuthController {
       });
     }
 
-    const rawResetToken = req.cookies?.[AUTH_CONSTANTS.COOKIE_RESET_NAME];
-    const result = await this.authService.resetPassword(parseResult.data, rawResetToken);
+    let callerUser: AuthenticatedUser | undefined;
+    let token = req.cookies?.[AUTH_CONSTANTS.COOKIE_ACCESS_NAME];
+    if (!token) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
+    }
 
-    res.clearCookie(AUTH_CONSTANTS.COOKIE_RESET_NAME, {
-      path: '/api/v1/auth/reset-password',
-    });
+    if (token) {
+      try {
+        const payload = await this.authService.verifyAccessToken(token);
+        callerUser = {
+          userId: payload.sub,
+          organizationId: payload.orgId,
+          sessionId: payload.sessionId,
+          roles: payload.roles,
+        };
+      } catch {
+        // Fall back to checking reset token
+      }
+    }
+
+    const rawResetToken = req.cookies?.[AUTH_CONSTANTS.COOKIE_RESET_NAME];
+    const result = await this.authService.resetPassword(
+      parseResult.data,
+      rawResetToken,
+      callerUser,
+    );
+
+    if (rawResetToken) {
+      res.clearCookie(AUTH_CONSTANTS.COOKIE_RESET_NAME, {
+        path: '/api/v1/auth/reset-password',
+      });
+    }
+
+    return {
+      success: true,
+      message: result.message,
+      data: null,
+      meta: null,
+    };
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const parseResult = changePasswordSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const callerUser = req.user!;
+    const result = await this.authService.changePassword(parseResult.data, callerUser);
 
     return {
       success: true,

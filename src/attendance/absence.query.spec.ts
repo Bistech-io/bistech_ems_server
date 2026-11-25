@@ -88,7 +88,7 @@ describe('buildAttendanceBoard', () => {
     });
   });
 
-  it('marks today as absent once workEnd has passed with no record', () => {
+  it('marks today as absent once workEnd has passed with no record after first check-in date', () => {
     const board = buildAttendanceBoard({
       now: new Date('2026-11-18T13:00:00Z'),
       timezone: 'Asia/Dhaka',
@@ -96,6 +96,7 @@ describe('buildAttendanceBoard', () => {
       from: '2026-11-18',
       to: '2026-11-18',
       joiningDate: '2026-11-01',
+      firstCheckInDate: '2026-11-01',
       exitDate: null,
       isEmployeeActive: true,
       holidayDates: new Set(),
@@ -108,5 +109,78 @@ describe('buildAttendanceBoard', () => {
     expect(board.records[0].isDerived).toBe(true);
     expect(board.summary.absentDays).toBe(1);
     expect(board.summary.attendanceRatePercent).toBe(0);
+  });
+
+  it('does not derive absences before the employee first check-in date even if joiningDate is earlier', () => {
+    const board = buildAttendanceBoard({
+      now: new Date('2026-11-18T04:00:00Z'),
+      timezone: 'Asia/Dhaka',
+      settings: SETTINGS,
+      from: '2026-11-01',
+      to: '2026-11-18',
+      joiningDate: '2026-11-01',
+      firstCheckInDate: '2026-11-18',
+      exitDate: null,
+      isEmployeeActive: true,
+      holidayDates: new Set(),
+      storedRows: [
+        {
+          id: 'rec-today',
+          workDate: new Date('2026-11-18T00:00:00Z'),
+          checkInAt: new Date('2026-11-18T03:05:00Z'),
+          status: 'present',
+          source: 'web',
+          lateMinutes: 0,
+          note: null,
+        },
+      ],
+      todayStoredRow: {
+        id: 'rec-today',
+        workDate: new Date('2026-11-18T00:00:00Z'),
+        checkInAt: new Date('2026-11-18T03:05:00Z'),
+        status: 'present',
+        source: 'web',
+        lateMinutes: 0,
+        note: null,
+      },
+    });
+
+    expect(board.today.status).toBe('present');
+    expect(board.records).toHaveLength(1);
+    expect(board.records[0].workDate).toBe('2026-11-18');
+    expect(board.summary).toEqual({
+      presentDays: 1,
+      lateDays: 0,
+      absentDays: 0,
+      expectedWorkingDays: 1,
+      attendanceRatePercent: 100,
+    });
+  });
+
+  it('does not derive absences when the employee has never checked in', () => {
+    const board = buildAttendanceBoard({
+      now: new Date('2026-11-18T13:00:00Z'),
+      timezone: 'Asia/Dhaka',
+      settings: SETTINGS,
+      from: '2026-11-01',
+      to: '2026-11-18',
+      joiningDate: '2026-11-01',
+      firstCheckInDate: null,
+      exitDate: null,
+      isEmployeeActive: true,
+      holidayDates: new Set(),
+      storedRows: [],
+      todayStoredRow: null,
+    });
+
+    expect(board.today.status).toBe('not_checked_in');
+    expect(board.records).toHaveLength(0);
+    expect(board.summary).toEqual({
+      presentDays: 0,
+      lateDays: 0,
+      absentDays: 0,
+      expectedWorkingDays: 0,
+      attendanceRatePercent: 100,
+    });
   });
 });

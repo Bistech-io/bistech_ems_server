@@ -11,12 +11,14 @@ import * as jose from 'jose';
 import { RevokedReason } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import { AUTH_CONSTANTS } from './auth.constants.js';
+import type { AuthenticatedUser } from './auth.guard.js';
 import { LoginDto } from './dto/login.dto.js';
 import {
   ForgotPasswordDto,
   VerifyOtpDto,
   ResetPasswordDto,
 } from './dto/reset-password.dto.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
 
 export interface UserAuthMeData {
   user: {
@@ -637,46 +639,214 @@ export class AuthService {
   async resetPassword(
     dto: ResetPasswordDto,
     tokenFromCookie?: string,
+    callerUser?: AuthenticatedUser,
   ): Promise<{ message: string }> {
     const rawToken = dto.resetToken || tokenFromCookie;
-    if (!rawToken) {
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'Password reset token is required',
+
+    // Flow 1: Reset via OTP token (forgot-password)
+    if (rawToken) {
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const authToken = await this.prisma.authToken.findUnique({
+        where: { tokenHash },
       });
+
+      if (
+        !authToken ||
+        authToken.usedAt ||
+        authToken.expiresAt < new Date() ||
+        authToken.purpose !== 'password_reset'
+      ) {
+        throw new UnauthorizedException({
+          code: 'INVALID_TOKEN',
+          message: 'Password reset token is invalid or has expired',
+        });
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: authToken.userId },
+      });
+
+      if (user) {
+        this.validatePasswordIdentityRules(dto.newPassword, user);
+      }
+
+      const passwordHash = await argon2.hash(dto.newPassword, {
+        type: argon2.argon2id,
+      });
+
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Consume token
+        await tx.authToken.update({
+          where: { id: authToken.id },
+          data: { usedAt: new Date() },
+        });
+
+        // 2. Update user credentials & clear lockout
+        await tx.user.update({
+          where: { id: authToken.userId },
+          data: {
+            passwordHash,
+            failedLoginCount: 0,
+            lockedUntil: null,
+            accountStatus: 'active',
+          },
+        });
+
+        // 3. Revoke all active sessions
+        await tx.userSession.updateMany({
+          where: {
+            organizationId: authToken.organizationId,
+            userId: authToken.userId,
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: new Date(),
+            revokedReason: 'user_revoke',
+          },
+        });
+      });
+
+      return { message: 'Password reset successfully' };
     }
 
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-    const authToken = await this.prisma.authToken.findUnique({
-      where: { tokenHash },
+    // Flow 2: Authenticated user (first-login setup or logged-in password update)
+    if (callerUser) {
+      const user = await this.prisma.user.findFirst({
+        where: {
+          id: callerUser.userId,
+          organizationId: callerUser.organizationId,
+        },
+      });
+
+      if (!user) {
+        throw new UnauthorizedException({
+          code: 'UNAUTHENTICATED',
+          message: 'User not found in organization',
+        });
+      }
+
+      if (dto.currentPassword) {
+        let passwordMatches = false;
+        try {
+          if (user.passwordHash) {
+            passwordMatches = await argon2.verify(user.passwordHash, dto.currentPassword);
+          }
+        } catch {
+          passwordMatches = false;
+        }
+
+        if (!passwordMatches) {
+          throw new BadRequestException({
+            code: 'INVALID_CREDENTIALS',
+            message: 'Current password is incorrect',
+          });
+        }
+
+        if (dto.currentPassword === dto.newPassword) {
+          throw new BadRequestException({
+            code: 'BAD_REQUEST',
+            message: 'New password cannot be the same as your current password',
+          });
+        }
+      }
+
+      this.validatePasswordIdentityRules(dto.newPassword, user);
+
+      const passwordHash = await argon2.hash(dto.newPassword, {
+        type: argon2.argon2id,
+      });
+
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Update user credentials & clear lockout
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            passwordHash,
+            failedLoginCount: 0,
+            lockedUntil: null,
+            accountStatus: 'active',
+          },
+        });
+
+        // 2. Revoke other sessions (if any), preserving current session for immediate operations (e.g. check-in)
+        const isSessionUuid =
+          callerUser.sessionId &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            callerUser.sessionId,
+          );
+
+        await tx.userSession.updateMany({
+          where: {
+            organizationId: callerUser.organizationId,
+            userId: user.id,
+            ...(isSessionUuid ? { id: { not: callerUser.sessionId } } : {}),
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: new Date(),
+            revokedReason: 'password_reset',
+          },
+        });
+      });
+
+      return { message: 'Password reset successfully' };
+    }
+
+    throw new UnauthorizedException({
+      code: 'UNAUTHORIZED',
+      message: 'Password reset token or active session is required',
+    });
+  }
+
+  async changePassword(
+    dto: ChangePasswordDto,
+    callerUser: AuthenticatedUser,
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: callerUser.userId,
+        organizationId: callerUser.organizationId,
+      },
     });
 
-    if (
-      !authToken ||
-      authToken.usedAt ||
-      authToken.expiresAt < new Date() ||
-      authToken.purpose !== 'password_reset'
-    ) {
+    if (!user || user.accountStatus !== 'active' || !user.passwordHash) {
       throw new UnauthorizedException({
-        code: 'INVALID_TOKEN',
-        message: 'Password reset token is invalid or has expired',
+        code: 'UNAUTHENTICATED',
+        message: 'User not found in organization',
       });
     }
+
+    let passwordMatches = false;
+    try {
+      passwordMatches = await argon2.verify(user.passwordHash, dto.currentPassword);
+    } catch {
+      passwordMatches = false;
+    }
+
+    if (!passwordMatches) {
+      throw new BadRequestException({
+        code: 'INVALID_CREDENTIALS',
+        message: 'Current password is incorrect',
+      });
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException({
+        code: 'BAD_REQUEST',
+        message: 'New password cannot be the same as your current password',
+      });
+    }
+
+    this.validatePasswordIdentityRules(dto.newPassword, user);
 
     const passwordHash = await argon2.hash(dto.newPassword, {
       type: argon2.argon2id,
     });
 
     await this.prisma.$transaction(async (tx) => {
-      // 1. Consume token
-      await tx.authToken.update({
-        where: { id: authToken.id },
-        data: { usedAt: new Date() },
-      });
-
-      // 2. Update user credentials & clear lockout
+      // 1. Update user credentials & clear lockout
       await tx.user.update({
-        where: { id: authToken.userId },
+        where: { id: user.id },
         data: {
           passwordHash,
           failedLoginCount: 0,
@@ -685,21 +855,46 @@ export class AuthService {
         },
       });
 
-      // 3. Revoke all active sessions
+      // 2. Revoke other sessions (if any), preserving current session
+      const isSessionUuid =
+        callerUser.sessionId &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          callerUser.sessionId,
+        );
+
       await tx.userSession.updateMany({
         where: {
-          organizationId: authToken.organizationId,
-          userId: authToken.userId,
+          organizationId: callerUser.organizationId,
+          userId: user.id,
+          ...(isSessionUuid ? { id: { not: callerUser.sessionId } } : {}),
           revokedAt: null,
         },
         data: {
           revokedAt: new Date(),
-          revokedReason: 'user_revoke',
+          revokedReason: 'password_reset',
         },
       });
     });
 
-    return { message: 'Password reset successfully' };
+    return { message: 'Password changed successfully' };
+  }
+
+  private validatePasswordIdentityRules(
+    newPassword: string,
+    user: { username?: string | null; name?: string | null; email?: string | null },
+  ) {
+    const lowerPwd = newPassword.toLowerCase();
+    const tokens = [user.username, user.name, user.email?.split('@')[0]]
+      .filter((t): t is string => Boolean(t && t.trim().length >= 3))
+      .flatMap((t) => [t.trim().toLowerCase(), ...t.trim().toLowerCase().split(/\s+/)])
+      .filter((t) => t.length >= 3);
+
+    if (tokens.some((token) => lowerPwd.includes(token))) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Password cannot contain your name, username, or email',
+      });
+    }
   }
 
   private async resolvePermissionsForRoles(roleIds: string[]): Promise<Record<string, string>> {
