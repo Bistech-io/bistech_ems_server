@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import type { UpdateOrganizationSettingsDto } from './dto/update-settings.dto.js';
 
 export interface OrganizationSettingsData {
@@ -71,13 +72,10 @@ export class OrganizationService {
     dto: UpdateOrganizationSettingsDto,
     caller: AuthenticatedUser,
   ): Promise<OrganizationSettingsData> {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
-
-    if (!isSuperAdmin && !isHrManager) {
+    if (!hasPermission(caller, 'org.settings.manage', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can update organization settings',
+        message: 'You do not have permission to update organization settings',
       });
     }
 

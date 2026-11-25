@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   CreateFeedbackCommentDto,
@@ -201,11 +202,14 @@ export class FeedbackService {
     dto: UpdateFeedbackDto,
     caller: AuthenticatedUser,
   ) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    if (!isSuperAdmin) {
+    const canManageFeedback =
+      caller.roles.includes('super_admin') ||
+      (!caller.roles.includes('hr_manager') &&
+        hasPermission(caller, 'feedback.manage', 'org'));
+    if (!canManageFeedback) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can update issue or suggestion status',
+        message: 'You do not have permission to update issue or suggestion status',
       });
     }
 
@@ -258,8 +262,7 @@ export class FeedbackService {
   }
 
   async deleteFeedback(id: string, caller: AuthenticatedUser) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
+    const canManageFeedback = hasPermission(caller, 'feedback.manage', 'org');
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.feedbackItem.findFirst({
@@ -277,7 +280,7 @@ export class FeedbackService {
       }
 
       const isCreator = existing.submittedBy === caller.userId;
-      if (!isCreator && !isSuperAdmin && !isHrManager) {
+      if (!isCreator && !canManageFeedback) {
         throw new ForbiddenException({
           code: 'FORBIDDEN',
           message:
@@ -429,7 +432,9 @@ export class FeedbackService {
     dto: UpdateFeedbackCommentDto,
     caller: AuthenticatedUser,
   ) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
+    const canModerateFeedback =
+      caller.roles.includes('super_admin') ||
+      hasPermission(caller, 'feedback.manage', 'org');
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.feedbackComment.findFirst({
@@ -448,7 +453,7 @@ export class FeedbackService {
       }
 
       const isAuthor = existing.authorUserId === caller.userId;
-      if (!isAuthor && !isSuperAdmin) {
+      if (!isAuthor && !canModerateFeedback) {
         throw new ForbiddenException({
           code: 'FORBIDDEN',
           message: 'Only the comment author or Super Admins can edit this comment',
@@ -483,8 +488,7 @@ export class FeedbackService {
     commentId: string,
     caller: AuthenticatedUser,
   ) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
+    const canManageFeedback = hasPermission(caller, 'feedback.manage', 'org');
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.feedbackComment.findFirst({
@@ -503,7 +507,7 @@ export class FeedbackService {
       }
 
       const isAuthor = existing.authorUserId === caller.userId;
-      if (!isAuthor && !isSuperAdmin && !isHrManager) {
+      if (!isAuthor && !canManageFeedback) {
         throw new ForbiddenException({
           code: 'FORBIDDEN',
           message:

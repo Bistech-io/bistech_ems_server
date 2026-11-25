@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
@@ -38,12 +39,14 @@ export class TeamsService {
   }
 
   private assertCanManageTeams(caller: AuthenticatedUser) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'team.manage', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'team.manage', 'department'));
     if (!isSuperAdmin && !isDeptHead) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins or Department Heads can manage teams',
+        message: 'You do not have permission to manage teams',
       });
     }
     return { isSuperAdmin, isDeptHead };
@@ -51,8 +54,10 @@ export class TeamsService {
 
   async listTeams(caller: AuthenticatedUser, query: ListTeamsQueryDto) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'team.read', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'team.read', 'department'));
     const ctx = await this.getCallerContext(orgId, caller.userId);
 
     const where: Record<string, unknown> = {
@@ -255,8 +260,10 @@ export class TeamsService {
 
   async getTeamById(teamId: string, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'team.read', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'team.read', 'department'));
     const ctx = await this.getCallerContext(orgId, caller.userId);
 
     const team = await this.prisma.team.findFirst({

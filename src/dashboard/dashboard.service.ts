@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import {
   getMonthStartIso,
@@ -82,13 +83,10 @@ export class DashboardService {
     caller: AuthenticatedUser,
     now: Date = new Date(),
   ): Promise<HrDashboardResponseDto> {
-    const isHrOrAdmin =
-      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
-
-    if (!isHrOrAdmin) {
+    if (!hasPermission(caller, 'dashboard.read', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can access the HR overview dashboard',
+        message: 'You do not have permission to access the HR overview dashboard',
       });
     }
 
@@ -146,10 +144,13 @@ export class DashboardService {
     caller: AuthenticatedUser,
     now: Date = new Date(),
   ): Promise<CompanyDashboardResponseDto> {
-    if (!caller.roles.includes('super_admin')) {
+    if (
+      !caller.roles.includes('super_admin') &&
+      !hasPermission(caller, 'role.manage', 'org')
+    ) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can access the company dashboard',
+        message: 'Only Super Admins or role administrators can access the company dashboard',
       });
     }
 
@@ -221,9 +222,15 @@ export class DashboardService {
     caller: AuthenticatedUser,
     now: Date = new Date(),
   ): Promise<SummaryDashboardResponseDto> {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin =
+      caller.roles.includes('super_admin') ||
+      hasPermission(caller, 'role.manage', 'org');
+    const isHrManager =
+      caller.roles.includes('hr_manager') ||
+      (!isSuperAdmin && hasPermission(caller, 'dashboard.read', 'org'));
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && !isHrManager && hasPermission(caller, 'dashboard.read', 'department'));
 
     const primaryRole: SummaryDashboardResponseDto['primaryRole'] = isSuperAdmin
       ? 'super_admin'

@@ -272,9 +272,12 @@ No `DELETE /employees/{id}`.
 |---|---|---|---|
 | GET, POST | /users | user.read / manage | POST creates accounts without employee profile and invites |
 | GET, PATCH | /users/{id} | read / manage | accountStatus active/suspended/disabled; disabling revokes sessions |
-| PUT | /users/{id}/roles | role.manage | replaces role set; audited; not on self |
+| PUT | /users/{id}/roles | role.manage | replaces role set (system & custom org roles); audited; not on self |
 | POST | /users/{id}/unlock | user.manage | |
-| GET | /roles, /permissions | user.read | system roles fixed |
+| GET | /roles, /permissions | user.read or role.manage | returns system + custom roles with granted `permissions` & scopes |
+| POST | /roles | role.manage | creates custom org role (`isSystem: false`) with permission grants; audited |
+| PATCH | /roles/{id} | role.manage | updates custom role description & permission grants (`isSystem` immutable); audited |
+| DELETE | /roles/{id} | role.manage | deletes custom role, preserves baseline `employee` role on affected users; audited |
 | GET | /audit-logs | audit.read | filters actorUserId, entityType, entityId, action, from, to; cursor; viewer audited |
 
 ### Attendance
