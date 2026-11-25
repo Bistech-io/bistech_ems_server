@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   AddTeamMembersDto,
@@ -38,7 +39,7 @@ export class TeamsService {
 
   private assertCanManageTeams(caller: AuthenticatedUser) {
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
     if (!isSuperAdmin && !isDeptHead) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -51,7 +52,7 @@ export class TeamsService {
   async listTeams(caller: AuthenticatedUser, query: ListTeamsQueryDto) {
     const orgId = caller.organizationId;
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
     const ctx = await this.getCallerContext(orgId, caller.userId);
 
     const where: Record<string, unknown> = {
@@ -255,7 +256,7 @@ export class TeamsService {
   async getTeamById(teamId: string, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
     const ctx = await this.getCallerContext(orgId, caller.userId);
 
     const team = await this.prisma.team.findFirst({

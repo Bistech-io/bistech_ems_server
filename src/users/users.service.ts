@@ -5,6 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import {
+  DEPT_HEAD_ROLE_NAMES,
+  isDepartmentHeadRole,
+  isDepartmentHeadRoleName,
+} from '../auth/role.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import type { UpdateUserRolesDto } from './dto/update-user-roles.dto.js';
@@ -32,7 +37,11 @@ export class UsersService {
     if (query.role) {
       where.userRoles = {
         some: {
-          role: { name: query.role },
+          role: {
+            name: isDepartmentHeadRoleName(query.role)
+              ? { in: [...DEPT_HEAD_ROLE_NAMES] }
+              : query.role,
+          },
         },
       };
     }
@@ -198,20 +207,40 @@ export class UsersService {
         }
       }
 
-      const dbRoles = await tx.role.findMany({
+      const hasDeptHeadRequested = requestedRoleNames.some(isDepartmentHeadRoleName);
+      const lookupRoleNames = Array.from(
+        new Set([
+          ...requestedRoleNames,
+          ...(hasDeptHeadRequested ? DEPT_HEAD_ROLE_NAMES : []),
+        ]),
+      );
+
+      const candidateDbRoles = await tx.role.findMany({
         where: {
           organizationId: orgId,
-          name: { in: requestedRoleNames },
+          name: { in: lookupRoleNames },
         },
         select: { id: true, name: true },
       });
 
-      if (dbRoles.length !== requestedRoleNames.length) {
-        throw new NotFoundException({
-          code: 'NOT_FOUND',
-          message: 'One or more requested roles do not exist in this organization',
-        });
+      const resolvedRoleMap = new Map<string, { id: string; name: string }>();
+      for (const reqName of requestedRoleNames) {
+        const matched = isDepartmentHeadRoleName(reqName)
+          ? candidateDbRoles.find((r) => r.name === 'dept_head') ??
+            candidateDbRoles.find((r) => r.name === 'department_head')
+          : candidateDbRoles.find((r) => r.name === reqName);
+
+        if (!matched) {
+          throw new NotFoundException({
+            code: 'NOT_FOUND',
+            message: 'One or more requested roles do not exist in this organization',
+          });
+        }
+        resolvedRoleMap.set(matched.id, matched);
       }
+
+      const dbRoles = Array.from(resolvedRoleMap.values());
+      const resolvedRoleNames = dbRoles.map((r) => r.name);
 
       await tx.userRole.deleteMany({
         where: {
@@ -229,6 +258,113 @@ export class UsersService {
         })),
       });
 
+      // Keep departments.head_employee_id synchronized with dept_head role assignment
+      const targetEmployee = tx.employee?.findFirst
+        ? await tx.employee.findFirst({
+            where: { organizationId: orgId, userId: targetUserId },
+            select: { id: true, departmentId: true },
+          })
+        : null;
+
+      if (targetEmployee && tx.department) {
+        const willBeDeptHead = isDepartmentHeadRole(resolvedRoleNames);
+
+        if (willBeDeptHead) {
+          const targetDeptId = dto.departmentId ?? targetEmployee.departmentId;
+          const existingHeadedDepts = await tx.department.findMany({
+            where: {
+              organizationId: orgId,
+              archivedAt: null,
+              headEmployeeId: targetEmployee.id,
+            },
+            select: { id: true },
+          });
+
+          const targetDept = await tx.department.findFirst({
+            where: {
+              organizationId: orgId,
+              id: targetDeptId,
+              archivedAt: null,
+            },
+            select: {
+              id: true,
+              headEmployeeId: true,
+              headEmployee: { select: { id: true, userId: true } },
+            },
+          });
+
+          if (dto.departmentId && !targetDept) {
+            throw new NotFoundException({
+              code: 'NOT_FOUND',
+              message: 'Department not found',
+            });
+          }
+
+          if (targetDept) {
+            const shouldAssignTargetDept =
+              Boolean(dto.departmentId) ||
+              (!targetDept.headEmployeeId && existingHeadedDepts.length === 0);
+
+            if (
+              shouldAssignTargetDept &&
+              targetDept.headEmployeeId !== targetEmployee.id
+            ) {
+              await tx.department.update({
+                where: {
+                  organizationId_id: {
+                    organizationId: orgId,
+                    id: targetDept.id,
+                  },
+                },
+                data: { headEmployeeId: targetEmployee.id },
+              });
+
+              const prevHeadEmpId = targetDept.headEmployeeId;
+              const prevHeadUserId = targetDept.headEmployee?.userId ?? null;
+              if (
+                prevHeadEmpId &&
+                prevHeadEmpId !== targetEmployee.id &&
+                prevHeadUserId
+              ) {
+                const otherHeadedCount = await tx.department.count({
+                  where: {
+                    organizationId: orgId,
+                    archivedAt: null,
+                    headEmployeeId: prevHeadEmpId,
+                    id: { not: targetDept.id },
+                  },
+                });
+
+                if (otherHeadedCount === 0) {
+                  const deptHeadRoleIds = candidateDbRoles
+                    .filter((r) => isDepartmentHeadRoleName(r.name))
+                    .map((r) => r.id);
+
+                  if (deptHeadRoleIds.length > 0) {
+                    await tx.userRole.deleteMany({
+                      where: {
+                        organizationId: orgId,
+                        userId: prevHeadUserId,
+                        roleId: { in: deptHeadRoleIds },
+                      },
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          await tx.department.updateMany({
+            where: {
+              organizationId: orgId,
+              archivedAt: null,
+              headEmployeeId: targetEmployee.id,
+            },
+            data: { headEmployeeId: null },
+          });
+        }
+      }
+
       await tx.auditLog.create({
         data: {
           organizationId: orgId,
@@ -238,7 +374,7 @@ export class UsersService {
           entityId: targetUserId,
           metadata: {
             previousRoles,
-            newRoles: requestedRoleNames,
+            newRoles: resolvedRoleNames,
           },
         },
       });
@@ -248,7 +384,7 @@ export class UsersService {
         email: targetUser.email,
         displayName: targetUser.displayName,
         accountStatus: targetUser.accountStatus,
-        roles: requestedRoleNames,
+        roles: resolvedRoleNames,
       };
     });
   }

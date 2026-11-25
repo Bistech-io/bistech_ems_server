@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import {
   getMonthStartIso,
   getOrgZonedParts,
@@ -222,7 +223,7 @@ export class DashboardService {
   ): Promise<SummaryDashboardResponseDto> {
     const isSuperAdmin = caller.roles.includes('super_admin');
     const isHrManager = caller.roles.includes('hr_manager');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
 
     const primaryRole: SummaryDashboardResponseDto['primaryRole'] = isSuperAdmin
       ? 'super_admin'

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import {
   buildAttendanceBoard,
   evaluateCheckInPunctuality,
@@ -198,7 +199,7 @@ export class AttendanceService {
         caller.userId,
       );
 
-    if (caller.roles.includes('department_head') && headedDepartmentIds.length > 0) {
+    if (isDepartmentHeadRole(caller.roles) && headedDepartmentIds.length > 0) {
       return {
         isOrgScope: false,
         allowedDepartmentIds: headedDepartmentIds,

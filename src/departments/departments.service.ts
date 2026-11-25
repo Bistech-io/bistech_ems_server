@@ -45,6 +45,33 @@ export class DepartmentsService {
             employeeCode: true,
           },
         },
+        employees: {
+          where: {
+            employmentStatus: 'active',
+            departmentsHeaded: {
+              none: {
+                archivedAt: null,
+              },
+            },
+            user: {
+              userRoles: {
+                some: {
+                  role: {
+                    name: { in: ['dept_head', 'department_head'] },
+                  },
+                },
+              },
+            },
+          },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+          },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
         _count: {
           select: {
             employees: {
@@ -56,21 +83,28 @@ export class DepartmentsService {
       orderBy: { name: 'asc' },
     });
 
-    return departments.map((d) => ({
-      id: d.id,
-      name: d.name,
-      description: d.description,
-      headEmployeeId: d.headEmployeeId,
-      headEmployee: d.headEmployee
-        ? {
-            id: d.headEmployee.id,
-            name: `${d.headEmployee.firstName} ${d.headEmployee.lastName}`.trim(),
-            employeeCode: d.headEmployee.employeeCode,
-          }
-        : null,
-      activeEmployeeCount: d._count.employees,
-      createdAt: d.createdAt,
-    }));
+    return departments.map((d) => {
+      const resolvedHead =
+        d.headEmployee ??
+        (d as { employees?: Array<{ id: string; firstName: string; lastName: string; employeeCode: string }> }).employees?.[0] ??
+        null;
+
+      return {
+        id: d.id,
+        name: d.name,
+        description: d.description,
+        headEmployeeId: resolvedHead?.id ?? null,
+        headEmployee: resolvedHead
+          ? {
+              id: resolvedHead.id,
+              name: `${resolvedHead.firstName} ${resolvedHead.lastName}`.trim(),
+              employeeCode: resolvedHead.employeeCode,
+            }
+          : null,
+        activeEmployeeCount: d._count.employees,
+        createdAt: d.createdAt,
+      };
+    });
   }
 
   async createDepartment(
