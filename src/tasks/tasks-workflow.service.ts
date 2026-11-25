@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   CreateCommentDto,
@@ -37,7 +38,7 @@ export class TasksWorkflowService {
   async getAssignmentById(assignmentId: string, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     const assignment = await this.prisma.taskAssignment.findUnique({
@@ -434,7 +435,7 @@ export class TasksWorkflowService {
   async listSubmissions(caller: AuthenticatedUser, query: ListSubmissionsQueryDto) {
     const orgId = caller.organizationId;
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
 
     if (!isSuperAdmin && !isDeptHead) {
       throw new ForbiddenException({
@@ -544,7 +545,7 @@ export class TasksWorkflowService {
   ) {
     const orgId = caller.organizationId;
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
 
     if (!isSuperAdmin && !isDeptHead) {
       throw new ForbiddenException({
@@ -695,7 +696,7 @@ export class TasksWorkflowService {
   private async assertCanActOnTask(taskId: string, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
     const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isDeptHead = isDepartmentHeadRole(caller.roles);
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     const task = await this.prisma.task.findUnique({

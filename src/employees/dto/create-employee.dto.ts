@@ -19,7 +19,7 @@ export const createEmployeeSchema = z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'Joining date must be in YYYY-MM-DD format'),
     roles: z
-      .array(z.enum(['employee', 'hr_manager', 'dept_head']))
+      .array(z.enum(['employee', 'hr_manager', 'dept_head', 'department_head']))
       .optional()
       .default(['employee']),
     password: z.string().min(6).optional(),
