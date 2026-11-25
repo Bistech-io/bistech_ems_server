@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const listUsersQuerySchema = z.object({
-  role: z.enum(['super_admin', 'hr_manager', 'department_head', 'employee']).optional(),
+  role: z.string().trim().toLowerCase().min(1).max(48).optional(),
   search: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),

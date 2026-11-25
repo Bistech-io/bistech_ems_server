@@ -38,9 +38,37 @@ export interface StoredAttendanceWithEmployee extends StoredAttendanceRow {
   };
 }
 
+const BASE_RECORD_SELECT = {
+  id: true,
+  workDate: true,
+  checkInAt: true,
+  status: true,
+  source: true,
+  lateMinutes: true,
+  note: true,
+} as const;
+
+const FULL_RECORD_SELECT = {
+  ...BASE_RECORD_SELECT,
+  checkOutAt: true,
+} as const;
+
+function isMissingCheckOutColumnError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const record = err as { code?: unknown; message?: unknown };
+  if (record.code === 'P2022') return true;
+  return typeof record.message === 'string' && record.message.includes('check_out_at');
+}
+
 @Injectable()
 export class AttendanceRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async ensureCheckOutColumn(): Promise<void> {
+    await this.prisma.$executeRawUnsafe(
+      'ALTER TABLE "attendance_records" ADD COLUMN IF NOT EXISTS "check_out_at" TIMESTAMPTZ',
+    );
+  }
 
   async findEmployeeContextByUserId(
     organizationId: string,
@@ -106,26 +134,28 @@ export class AttendanceRepository {
     fromIso: string,
     toIso: string,
   ): Promise<StoredAttendanceRow[]> {
-    return this.prisma.attendanceRecord.findMany({
-      where: {
-        organizationId,
-        employeeId,
-        workDate: {
-          gte: new Date(`${fromIso}T00:00:00Z`),
-          lte: new Date(`${toIso}T00:00:00Z`),
-        },
+    const where = {
+      organizationId,
+      employeeId,
+      workDate: {
+        gte: new Date(`${fromIso}T00:00:00Z`),
+        lte: new Date(`${toIso}T00:00:00Z`),
       },
-      orderBy: { workDate: 'asc' },
-      select: {
-        id: true,
-        workDate: true,
-        checkInAt: true,
-        status: true,
-        source: true,
-        lateMinutes: true,
-        note: true,
-      },
-    });
+    };
+    try {
+      return await this.prisma.attendanceRecord.findMany({
+        where,
+        orderBy: { workDate: 'asc' },
+        select: FULL_RECORD_SELECT,
+      });
+    } catch (err) {
+      if (!isMissingCheckOutColumnError(err)) throw err;
+      return this.prisma.attendanceRecord.findMany({
+        where,
+        orderBy: { workDate: 'asc' },
+        select: BASE_RECORD_SELECT,
+      });
+    }
   }
 
   async findRecordByDate(
@@ -133,22 +163,23 @@ export class AttendanceRepository {
     employeeId: string,
     workDateIso: string,
   ): Promise<StoredAttendanceRow | null> {
-    return this.prisma.attendanceRecord.findFirst({
-      where: {
-        organizationId,
-        employeeId,
-        workDate: new Date(`${workDateIso}T00:00:00Z`),
-      },
-      select: {
-        id: true,
-        workDate: true,
-        checkInAt: true,
-        status: true,
-        source: true,
-        lateMinutes: true,
-        note: true,
-      },
-    });
+    const where = {
+      organizationId,
+      employeeId,
+      workDate: new Date(`${workDateIso}T00:00:00Z`),
+    };
+    try {
+      return await this.prisma.attendanceRecord.findFirst({
+        where,
+        select: FULL_RECORD_SELECT,
+      });
+    } catch (err) {
+      if (!isMissingCheckOutColumnError(err)) throw err;
+      return this.prisma.attendanceRecord.findFirst({
+        where,
+        select: BASE_RECORD_SELECT,
+      });
+    }
   }
 
   async createWebCheckIn(input: {
@@ -160,27 +191,54 @@ export class AttendanceRepository {
     lateMinutes: number;
     note?: string;
   }): Promise<StoredAttendanceRow> {
-    return this.prisma.attendanceRecord.create({
-      data: {
-        organizationId: input.organizationId,
-        employeeId: input.employeeId,
-        workDate: new Date(`${input.workDateIso}T00:00:00Z`),
-        checkInAt: input.checkInAt,
-        status: input.status,
-        source: 'web',
-        lateMinutes: input.lateMinutes,
-        note: input.note ?? null,
-      },
-      select: {
-        id: true,
-        workDate: true,
-        checkInAt: true,
-        status: true,
-        source: true,
-        lateMinutes: true,
-        note: true,
-      },
-    });
+    const data = {
+      organizationId: input.organizationId,
+      employeeId: input.employeeId,
+      workDate: new Date(`${input.workDateIso}T00:00:00Z`),
+      checkInAt: input.checkInAt,
+      status: input.status,
+      source: 'web' as const,
+      lateMinutes: input.lateMinutes,
+      note: input.note ?? null,
+    };
+    try {
+      return await this.prisma.attendanceRecord.create({
+        data,
+        select: FULL_RECORD_SELECT,
+      });
+    } catch (err) {
+      if (!isMissingCheckOutColumnError(err)) throw err;
+      return this.prisma.attendanceRecord.create({
+        data,
+        select: BASE_RECORD_SELECT,
+      });
+    }
+  }
+
+  async recordWebCheckOut(input: {
+    id: string;
+    checkOutAt: Date;
+    note?: string;
+  }): Promise<StoredAttendanceRow> {
+    const data = {
+      checkOutAt: input.checkOutAt,
+      ...(input.note !== undefined ? { note: input.note } : {}),
+    };
+    try {
+      return await this.prisma.attendanceRecord.update({
+        where: { id: input.id },
+        data,
+        select: FULL_RECORD_SELECT,
+      });
+    } catch (err) {
+      if (!isMissingCheckOutColumnError(err)) throw err;
+      await this.ensureCheckOutColumn();
+      return this.prisma.attendanceRecord.update({
+        where: { id: input.id },
+        data,
+        select: FULL_RECORD_SELECT,
+      });
+    }
   }
 
   async findOrganizationConfig(

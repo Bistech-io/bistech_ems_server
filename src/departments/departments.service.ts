@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import type { AssignDepartmentHeadDto } from './dto/assign-department-head.dto.js';
 import type {
   CreateDepartmentDto,
@@ -19,13 +20,10 @@ export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   private checkManagePermission(caller: AuthenticatedUser) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
-
-    if (!isSuperAdmin && !isHrManager) {
+    if (!hasPermission(caller, 'org.structure.manage', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can manage departments and designations',
+        message: 'You do not have permission to manage departments and designations',
       });
     }
   }
@@ -45,6 +43,33 @@ export class DepartmentsService {
             employeeCode: true,
           },
         },
+        employees: {
+          where: {
+            employmentStatus: 'active',
+            departmentsHeaded: {
+              none: {
+                archivedAt: null,
+              },
+            },
+            user: {
+              userRoles: {
+                some: {
+                  role: {
+                    name: { in: ['dept_head', 'department_head'] },
+                  },
+                },
+              },
+            },
+          },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+          },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
         _count: {
           select: {
             employees: {
@@ -56,21 +81,28 @@ export class DepartmentsService {
       orderBy: { name: 'asc' },
     });
 
-    return departments.map((d) => ({
-      id: d.id,
-      name: d.name,
-      description: d.description,
-      headEmployeeId: d.headEmployeeId,
-      headEmployee: d.headEmployee
-        ? {
-            id: d.headEmployee.id,
-            name: `${d.headEmployee.firstName} ${d.headEmployee.lastName}`.trim(),
-            employeeCode: d.headEmployee.employeeCode,
-          }
-        : null,
-      activeEmployeeCount: d._count.employees,
-      createdAt: d.createdAt,
-    }));
+    return departments.map((d) => {
+      const resolvedHead =
+        d.headEmployee ??
+        (d as { employees?: Array<{ id: string; firstName: string; lastName: string; employeeCode: string }> }).employees?.[0] ??
+        null;
+
+      return {
+        id: d.id,
+        name: d.name,
+        description: d.description,
+        headEmployeeId: resolvedHead?.id ?? null,
+        headEmployee: resolvedHead
+          ? {
+              id: resolvedHead.id,
+              name: `${resolvedHead.firstName} ${resolvedHead.lastName}`.trim(),
+              employeeCode: resolvedHead.employeeCode,
+            }
+          : null,
+        activeEmployeeCount: d._count.employees,
+        createdAt: d.createdAt,
+      };
+    });
   }
 
   async createDepartment(
@@ -398,10 +430,10 @@ export class DepartmentsService {
     dto: AssignDepartmentHeadDto,
     caller: AuthenticatedUser,
   ) {
-    if (!caller.roles.includes('super_admin')) {
+    if (!hasPermission(caller, 'department.head.assign', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can assign or remove a department head',
+        message: 'You do not have permission to assign or remove a department head',
       });
     }
 

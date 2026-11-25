@@ -166,6 +166,36 @@ describe('AuthService', () => {
         },
       });
     });
+
+    it('orders roles by highest priority so promoted dept_head precedes employee', async () => {
+      const hash = await argon2.hash('Password123!');
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: 'org-1', slug: 'bistech' });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-dh',
+        username: 'demo_dept_head',
+        displayName: 'Demo Department Head',
+        email: 'dh@bistech.io',
+        passwordHash: hash,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        accountStatus: 'active',
+        employee: { id: 'emp-dh' },
+        userRoles: [
+          { role: { id: 'r-emp', name: 'employee' } },
+          { role: { id: 'r-dh', name: 'dept_head' } },
+        ],
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.userSession.create.mockResolvedValue({ id: 'session-dh' });
+      mockPrisma.rolePermission.findMany.mockResolvedValue([]);
+
+      const result = await authService.login({
+        username: 'demo_dept_head',
+        password: 'Password123!',
+      });
+
+      expect(result.authMeData.roles).toEqual(['dept_head', 'employee']);
+    });
   });
 
   describe('refresh', () => {

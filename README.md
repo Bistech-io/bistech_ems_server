@@ -1,132 +1,180 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+<div align="center">
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+# BisTech EMS Server
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+**Enterprise-grade Employee Management System REST API**
 
-## Description
+Built with **NestJS 12**, **TypeScript**, **Prisma 7**, **PostgreSQL**, and **Zod** — powering authentication, RBAC governance, employee directories, timezone-aware attendance, task workflows, and role-scoped analytics dashboards.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+[![NestJS](https://img.shields.io/badge/NestJS-12.x-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)](https://nestjs.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-7.x-2D3748?style=for-the-badge&logo=prisma&logoColor=white)](https://www.prisma.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Zod](https://img.shields.io/badge/Zod-4.x-3E67B1?style=for-the-badge&logo=zod&logoColor=white)](https://zod.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-4.x-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vercel](https://img.shields.io/badge/Deploy-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://vercel.com/)
 
-## Project setup
+</div>
 
-```bash
-$ npm install
+---
+
+## Key Capabilities
+
+- **Authentication & Session Security**: HttpOnly cookie + Bearer JWT (`jose`) authentication, `argon2id` password hashing, refresh token rotation, account lockout protection, and 6-digit OTP password reset & change-password flows.
+- **Role-Based Access Control (RBAC)**: Scoped permissions across `super_admin`, `hr_manager`, `department_head`, and `employee` roles, with fail-closed out-of-scope (`404`) protection on sensitive records.
+- **Employee Directory & Personal Profiles**: Full employee onboarding, department/designation transfers with employment history & audit logs, plus self-service and HR-managed sensitive personal profile endpoints (`/employees/me/profile`).
+- **Timezone-Aware Attendance**: Daily web check-in, late-minute calculation against organization shift settings (`workStart`, `workEnd`, `graceMinutes`, `weekendDays`), holiday-aware absence derivation, and monthly attendance boards.
+- **Task Management & Review Workflow**: Self, individual, and team task assignments; department & team boards; submission versioning; approval/changes-requested reviews; comments & suggestions; and review notifications.
+- **Role-Scoped Dashboards**: Dedicated overview endpoints for Employees (`/dashboard/me`), HR Managers (`/dashboard/hr`), Super Admins (`/dashboard/company`), and unified multi-role summaries (`/dashboard/summary`).
+- **Consistent API Envelopes**: Standardized `{ success, message, data, meta }` success payloads and `{ success: false, error: { code, message, details? }, requestId }` error responses via a global `HttpExceptionFilter`.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **Framework** | NestJS 12 (`@nestjs/core`, `@nestjs/platform-express`, Express 5) |
+| **Language** | TypeScript 6 (ESM / `nodenext`) |
+| **Database & ORM** | PostgreSQL 15+ with Prisma 7 (`@prisma/client`, `@prisma/adapter-pg`, `pg`) |
+| **Validation** | Zod 4 |
+| **Auth & Security** | `jose` (JWT), `argon2` (Argon2id), `cookie-parser` |
+| **Testing** | Vitest 4 & Supertest |
+| **Linting & Formatting** | Oxlint (`--type-aware`) & Prettier 3 |
+| **Hosting** | Vercel Serverless (`api/index.js` + `vercel.json`) |
+
+---
+
+## Project Structure
+
+```text
+bistech_ems_server/
+├── api/                    # Vercel serverless entrypoint
+├── docs/                   # Product & architecture specs (PRD, FSD, FTL, SAD, TAD)
+├── prisma/
+│   └── schema.prisma       # PostgreSQL schema & models
+├── src/
+│   ├── attendance/         # Check-in, attendance boards, absence computation
+│   ├── auth/               # Login, refresh, logout, OTP reset & change password
+│   ├── common/             # Global HttpExceptionFilter & shared utilities
+│   ├── dashboard/          # Employee, HR, Company & Summary dashboard metrics
+│   ├── database/           # PrismaService & bootstrap/seed utilities
+│   ├── departments/        # Departments, department heads & designations
+│   ├── employees/          # Employee CRUD, employment history & sensitive profiles
+│   ├── feedback/           # Issues and suggestions (submit, list, review)
+│   ├── organization/       # Organization profile & shift/weekend settings
+│   ├── tasks/              # Tasks, boards, assignments, submissions & comments
+│   ├── teams/              # Teams & team membership management
+│   ├── users/              # User accounts & role assignments
+│   ├── app.module.ts       # Root NestJS module
+│   └── main.ts             # App bootstrap, CORS, cookie-parser & /api/v1 prefix
+└── test/                   # End-to-end Vitest suites
 ```
 
-## Compile and run the project
+---
+
+## API Modules (`/api/v1`)
+
+All endpoints (except `/` and `/api/v1/health/db` or public auth routes) are served under `/api/v1` with cookie/JWT authentication via `AuthGuard`.
+
+| Module | Base Path | Highlights |
+| :--- | :--- | :--- |
+| **Health** | `/`, `/api/v1/health/db` | Service status & PostgreSQL connectivity check |
+| **Auth** | `/api/v1/auth` | `login`, `refresh`, `logout`, `me`, `forgot-password`, `verify-otp`, `reset-password`, `change-password` |
+| **Organization** | `/api/v1/organization` | Get/update organization details & shift/weekend settings (`/settings`) |
+| **Users & Roles** | `/api/v1/users`, `/api/v1/roles` | List users/roles and assign user roles (`PUT /users/:id/roles`) |
+| **Departments** | `/api/v1/departments`, `/api/v1/designations` | Department & designation CRUD, assign department head (`PUT /departments/:id/head`) |
+| **Teams** | `/api/v1/teams` | Team CRUD & member management (`POST/DELETE /teams/:id/members`) |
+| **Employees** | `/api/v1/employees` | Directory listing, onboarding, work-record updates, & sensitive profiles (`/me/profile`, `/:id/profile`) |
+| **Attendance** | `/api/v1/attendance` | Daily check-in (`POST /check-in`), check-out (`POST /check-out`), personal board (`/me`), summary (`/summary`), org logs |
+| **Tasks** | `/api/v1/tasks`, `/api/v1/task-assignments`, `/api/v1/task-submissions` | Task CRUD, `/me`, `/board/department`, `/board/team`, status transitions, submissions, reviews & comments |
+| **Feedback (Issues & Suggestions)** | `/api/v1/feedback` | Submit (`POST`), list company-wide items with author details (`GET`), view (`GET /:id`), triage (`PATCH /:id`), delete (`DELETE /:id`), & comments (`GET/POST /:id/comments`, `PATCH/DELETE /:id/comments/:commentId`) |
+| **Dashboard** | `/api/v1/dashboard` | Role-scoped analytics (`/me`, `/hr`, `/company`, `/summary`) |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js** `>= 22`
+- **PostgreSQL** `>= 15`
+
+### 1. Install Dependencies
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+git clone https://github.com/Bistech-io/bistech_ems_server.git
+cd bistech_ems_server
+npm install
 ```
 
-## Run tests
+### 2. Configure Environment
+
+Copy `.env.example` to `.env` and fill in your database and auth configuration:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cp .env.example .env
 ```
 
-## Deployment
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/bistech_ems"
+CLOUDINARY_URL="cloudinary://<api_key>:<api_secret>@<cloud_name>"
+JWT_SECRET="your-32-byte-minimum-secret"
+PORT=4000
+```
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 3. Generate Prisma Client & Run Migrations
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run prisma:generate
+npm run prisma:migrate
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+### 4. Start the Server
 
 ```bash
-$ npx @nestjs/observe link
+# Development (watch mode)
+npm run start:dev
+
+# Production build & start
+npm run build
+npm run start:prod
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+The API will be available at `http://localhost:4000/api/v1`.
 
-Or do it by hand:
+---
 
-```bash
-$ npm install @nestjs/observe
-```
+## Available Scripts
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+| Script | Description |
+| :--- | :--- |
+| `npm run start:dev` | Start NestJS in watch mode |
+| `npm run build` | Generate Prisma client & compile NestJS build |
+| `npm run start:prod` | Run compiled production build (`node dist/main`) |
+| `npm run lint` | Run type-aware `oxlint` across `src/` and `test/` |
+| `npm run format` | Format TypeScript files with Prettier |
+| `npm test` | Run Vitest unit test suite |
+| `npm run test:cov` | Run Vitest with V8 coverage report |
+| `npm run test:e2e` | Run end-to-end Vitest suite |
+| `npm run prisma:generate` | Regenerate Prisma Client |
+| `npm run prisma:migrate` | Run Prisma database migrations (`migrate dev`) |
+| `npm run prisma:studio` | Open Prisma Studio |
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+---
 
-## Resources
+## Architecture & Docs
 
-Check out a few resources that may come in handy when working with NestJS:
+Detailed product and engineering specifications live in the [`docs/`](./docs) directory:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+- [`PRD.md`](./docs/PRD.md) — Product Requirements Document
+- [`FSD.md`](./docs/FSD.md) — Functional Specification Document
+- [`FTL.md`](./docs/FTL.md) — Feature Traceability List
+- [`SAD.md`](./docs/SAD.md) — Software Architecture Document
+- [`TAD.md`](./docs/TAD.md) — Technical Architecture Document
 
-## Support
+---
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+<div align="center">
+  <sub>Maintained by the BisTech Engineering Team</sub>
+</div>

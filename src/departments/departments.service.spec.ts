@@ -104,6 +104,38 @@ describe('DepartmentsService', () => {
         },
       ]);
     });
+
+    it('falls back to active employee with dept_head role when headEmployeeId is null', async () => {
+      prismaMock.department.findMany.mockResolvedValue([
+        {
+          id: 'dept-demo',
+          name: 'Demo Department',
+          description: null,
+          headEmployeeId: null,
+          headEmployee: null,
+          employees: [
+            {
+              id: 'emp-demo-head',
+              firstName: 'Demo',
+              lastName: 'Dept Head',
+              employeeCode: 'BST-1017',
+            },
+          ],
+          _count: { employees: 3 },
+          createdAt: new Date('2026-11-25T00:00:00Z'),
+        },
+      ]);
+
+      const result = await service.listDepartments('org-1');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].headEmployeeId).toBe('emp-demo-head');
+      expect(result[0].headEmployee).toEqual({
+        id: 'emp-demo-head',
+        name: 'Demo Dept Head',
+        employeeCode: 'BST-1017',
+      });
+    });
   });
 
   describe('createDepartment', () => {

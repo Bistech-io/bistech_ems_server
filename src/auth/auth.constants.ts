@@ -1,12 +1,12 @@
 export const AUTH_CONSTANTS = {
   JWT_SECRET: process.env.JWT_SECRET || 'bistech-ems-super-secret-key-32-bytes-minimum!',
-  JWT_EXPIRES_IN: '15m',
+  JWT_EXPIRES_IN: '12h',
   REFRESH_TOKEN_DAYS: 7,
   ABSOLUTE_SESSION_DAYS: 30,
   COOKIE_ACCESS_NAME: 'ems_access',
   COOKIE_REFRESH_NAME: 'ems_refresh',
   COOKIE_RESET_NAME: 'ems_reset',
-  COOKIE_ACCESS_MAX_AGE_MS: 15 * 60 * 1000, // 15 mins
+  COOKIE_ACCESS_MAX_AGE_MS: 12 * 60 * 60 * 1000, // 12 hours
   COOKIE_REFRESH_MAX_AGE_MS: 7 * 24 * 60 * 60 * 1000, // 7 days
   COOKIE_RESET_MAX_AGE_MS: 15 * 60 * 1000, // 15 mins
   MAX_FAILED_LOGIN_ATTEMPTS: 5,

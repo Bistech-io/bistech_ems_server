@@ -194,6 +194,7 @@ model User {
   taskStatusEventsActed      TaskStatusEvent[]            @relation("TaskStatusEventActor")
   feedbackItemsSubmitted     FeedbackItem[]               @relation("FeedbackSubmitter")
   feedbackItemsHandled       FeedbackItem[]               @relation("FeedbackHandler")
+  feedbackComments           FeedbackComment[]            @relation("FeedbackCommentAuthor")
   notifications              Notification[]
   auditLogsActed             AuditLog[]                   @relation("AuditLogActor")
   idempotencyKeys            IdempotencyKey[]
@@ -488,6 +489,7 @@ model AttendanceRecord {
   employeeId     String           @map("employee_id") @db.Uuid
   workDate       DateTime         @map("work_date") @db.Date
   checkInAt      DateTime?        @map("check_in_at") @db.Timestamptz()
+  checkOutAt     DateTime?        @map("check_out_at") @db.Timestamptz()
   status         AttendanceStatus
   source         AttendanceSource
   lateMinutes    Int              @default(0) @map("late_minutes")
@@ -697,12 +699,30 @@ model FeedbackItem {
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
-  submitter User  @relation("FeedbackSubmitter", fields: [organizationId, submittedBy], references: [organizationId, id])
-  handler   User? @relation("FeedbackHandler", fields: [organizationId, handledBy], references: [organizationId, id])
+  submitter User              @relation("FeedbackSubmitter", fields: [organizationId, submittedBy], references: [organizationId, id])
+  handler   User?             @relation("FeedbackHandler", fields: [organizationId, handledBy], references: [organizationId, id])
+  comments  FeedbackComment[]
 
+  @@unique([organizationId, id])
   @@index([organizationId, status, createdAt(sort: Desc)])
   @@index([submittedBy, createdAt(sort: Desc)])
   @@map("feedback_items")
+}
+
+model FeedbackComment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  feedbackId     String   @map("feedback_id") @db.Uuid
+  authorUserId   String   @map("author_user_id") @db.Uuid
+  body           String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  feedback FeedbackItem @relation(fields: [organizationId, feedbackId], references: [organizationId, id], onDelete: Cascade)
+  author   User         @relation("FeedbackCommentAuthor", fields: [organizationId, authorUserId], references: [organizationId, id])
+
+  @@index([feedbackId, createdAt, id])
+  @@map("feedback_comments")
 }
 
 model Notification {

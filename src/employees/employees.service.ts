@@ -12,6 +12,11 @@ import {
   HistoryEventType,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
+import {
+  isDepartmentHeadRole,
+  isDepartmentHeadRoleName,
+} from '../auth/role.utils.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { CreateEmployeeDto } from './dto/create-employee.dto.js';
 import type { UpdateEmployeeDto } from './dto/update-employee.dto.js';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
@@ -28,21 +33,21 @@ export class EmployeesService {
     const orgId = caller.organizationId;
 
     // 1. Role permission checks
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
+    const canCreateEmployee = hasPermission(caller, 'employee.create', 'org');
+    const canManageRoles = hasPermission(caller, 'role.manage', 'org');
 
-    if (!isSuperAdmin && !isHrManager) {
+    if (!canCreateEmployee) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can create employees and accounts',
+        message: 'You do not have permission to create employees and accounts',
       });
     }
 
     const assignedRoles = dto.roles && dto.roles.length > 0 ? dto.roles : ['employee'];
-    if (assignedRoles.some((r) => r !== 'employee') && !isSuperAdmin) {
+    if (assignedRoles.some((r) => r !== 'employee') && !canManageRoles) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can assign management roles during onboarding',
+        message: 'Only role administrators can assign extra roles during onboarding',
       });
     }
 
@@ -156,17 +161,40 @@ export class EmployeesService {
       });
 
       // 6.3 Assign Roles
+      const persistedRoles: string[] = [];
+      const assignedRoleIds = new Set<string>();
       for (const roleName of assignedRoles) {
-        const role = await tx.role.findUnique({
+        let role = await tx.role.findUnique({
           where: {
             organizationId_name: {
               organizationId: orgId,
-              name: roleName,
+              name:
+                roleName === 'department_head' ? 'dept_head' : roleName,
             },
           },
         });
 
-        if (role) {
+        if (!role && isDepartmentHeadRoleName(roleName)) {
+          role = await tx.role.findUnique({
+            where: {
+              organizationId_name: {
+                organizationId: orgId,
+                name: 'department_head',
+              },
+            },
+          });
+        }
+
+        if (!role) {
+          throw new BadRequestException({
+            code: 'VALIDATION_ERROR',
+            message: `Role '${roleName}' does not exist in this organization`,
+          });
+        }
+
+        if (!assignedRoleIds.has(role.id)) {
+          assignedRoleIds.add(role.id);
+          persistedRoles.push(role.name ?? roleName);
           await tx.userRole.create({
             data: {
               organizationId: orgId,
@@ -195,6 +223,22 @@ export class EmployeesService {
           joiningDate: new Date(dto.joiningDate),
         },
       });
+
+      if (
+        isDepartmentHeadRole(persistedRoles) &&
+        !department.headEmployeeId &&
+        tx.department?.update
+      ) {
+        await tx.department.update({
+          where: {
+            organizationId_id: {
+              organizationId: orgId,
+              id: department.id,
+            },
+          },
+          data: { headEmployeeId: employee.id },
+        });
+      }
 
       // 6.5 Create Profile
       const prof = dto.personalProfile;
@@ -242,7 +286,7 @@ export class EmployeesService {
           metadata: {
             employeeCode,
             username: derivedUsername,
-            roles: assignedRoles,
+            roles: persistedRoles.length > 0 ? persistedRoles : assignedRoles,
             idempotencyKey,
           },
         },
@@ -273,7 +317,7 @@ export class EmployeesService {
           displayName: user.displayName,
           email: user.email,
           accountStatus: user.accountStatus,
-          roles: assignedRoles,
+          roles: persistedRoles.length > 0 ? persistedRoles : assignedRoles,
         },
         createdAt: employee.createdAt,
       };
@@ -301,9 +345,10 @@ export class EmployeesService {
       organizationId: orgId,
     };
 
-    const isHrOrAdmin =
-      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
-    const isDeptHead = caller.roles.includes('department_head');
+    const isHrOrAdmin = hasPermission(caller, 'employee.read', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      hasPermission(caller, 'employee.read', 'department');
 
     if (!isHrOrAdmin) {
       if (isDeptHead) {
@@ -448,13 +493,15 @@ export class EmployeesService {
       });
     }
 
-    const isHrOrAdmin =
-      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+    const isHrOrAdmin = hasPermission(caller, 'employee.read', 'org');
     const isOwner = employee.user.id === caller.userId;
 
     if (!isHrOrAdmin && !isOwner) {
       let isManagedHead = false;
-      if (caller.roles.includes('department_head')) {
+      if (
+        isDepartmentHeadRole(caller.roles) ||
+        hasPermission(caller, 'employee.read', 'department')
+      ) {
         const headed = await this.prisma.department.findFirst({
           where: {
             organizationId: caller.organizationId,
@@ -505,13 +552,10 @@ export class EmployeesService {
     dto: UpdateEmployeeDto,
     caller: AuthenticatedUser,
   ) {
-    const isHrOrAdmin =
-      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
-
-    if (!isHrOrAdmin) {
+    if (!hasPermission(caller, 'employee.update', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can update employee work records',
+        message: 'You do not have permission to update employee work records',
       });
     }
 

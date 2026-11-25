@@ -308,7 +308,7 @@ modules/identity/                               owns: users, roles, permissions,
 │   ├── users.service.ts                        status changes, role replacement, last-Super-Admin guard
 │   └── users.repository.ts
 ├── roles/
-│   ├── roles.controller.ts                     GET /roles, GET /permissions
+│   ├── roles.controller.ts                     GET/POST /roles, PATCH/DELETE /roles/{id}, GET /permissions
 │   ├── roles.service.ts
 │   └── roles.repository.ts
 ├── auth-tokens.repository.ts
@@ -1019,28 +1019,6 @@ CREATE TABLE employee_profiles (
   updated_at                timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT employee_profiles_employee_fk FOREIGN KEY (organization_id, employee_id)
     REFERENCES employees (organization_id, id)
-);
-
-CREATE TABLE users_info (
-  id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id                   uuid NOT NULL UNIQUE,
-  organization_id           uuid NOT NULL,
-  personal_email            text CHECK (char_length(personal_email) <= 254),
-  personal_phone            text CHECK (personal_phone ~ '^\+[1-9][0-9]{6,14}$'),
-  date_of_birth             date CHECK (date_of_birth < CURRENT_DATE),
-  address_line              text CHECK (char_length(address_line) <= 300),
-  city                      text CHECK (char_length(city) <= 100),
-  country_code              char(2) CHECK (country_code ~ '^[A-Z]{2}$'),
-  emergency_contact_name    text CHECK (char_length(emergency_contact_name) <= 120),
-  emergency_contact_phone   text CHECK (emergency_contact_phone ~ '^\+[1-9][0-9]{6,14}$'),
-  emergency_contact_relation text CHECK (char_length(emergency_contact_relation) <= 60),
-  created_at                timestamptz NOT NULL DEFAULT now(),
-  updated_at                timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT users_info_user_fk FOREIGN KEY (organization_id, user_id)
-    REFERENCES users (organization_id, id) ON DELETE CASCADE,
-  CONSTRAINT users_info_org_fk FOREIGN KEY (organization_id)
-    REFERENCES organizations (id) ON DELETE CASCADE,
-  CONSTRAINT users_info_org_user_uniq UNIQUE (organization_id, user_id)
 );
 
 CREATE TABLE employee_employment_history (
