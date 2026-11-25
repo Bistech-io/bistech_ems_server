@@ -11,6 +11,7 @@ import { OrganizationModule } from './organization/organization.module.js';
 import { UsersModule } from './users/index.js';
 import { TasksModule } from './tasks/index.js';
 import { TeamsModule } from './teams/index.js';
+import { FeedbackModule } from './feedback/index.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { TeamsModule } from './teams/index.js';
     UsersModule,
     TasksModule,
     TeamsModule,
+    FeedbackModule,
   ],
   controllers: [AppController],
   providers: [AppService],
