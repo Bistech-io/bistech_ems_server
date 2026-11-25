@@ -308,7 +308,7 @@ modules/identity/                               owns: users, roles, permissions,
 │   ├── users.service.ts                        status changes, role replacement, last-Super-Admin guard
 │   └── users.repository.ts
 ├── roles/
-│   ├── roles.controller.ts                     GET /roles, GET /permissions
+│   ├── roles.controller.ts                     GET/POST /roles, PATCH/DELETE /roles/{id}, GET /permissions
 │   ├── roles.service.ts
 │   └── roles.repository.ts
 ├── auth-tokens.repository.ts

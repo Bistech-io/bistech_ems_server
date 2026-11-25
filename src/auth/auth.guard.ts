@@ -13,6 +13,7 @@ export interface AuthenticatedUser {
   organizationId: string;
   sessionId: string;
   roles: string[];
+  permissions?: Record<string, string>;
 }
 
 declare global {
@@ -46,12 +47,17 @@ export class AuthGuard implements CanActivate {
     }
 
     const payload = await this.authService.verifyAccessToken(token);
+    const liveContext = await this.authService.resolveAccessContext(
+      payload.sub,
+      payload.orgId,
+    );
 
     request.user = {
       userId: payload.sub,
       organizationId: payload.orgId,
       sessionId: payload.sessionId,
-      roles: payload.roles,
+      roles: liveContext ? liveContext.roles : payload.roles,
+      permissions: liveContext ? liveContext.permissions : undefined,
     };
 
     return true;

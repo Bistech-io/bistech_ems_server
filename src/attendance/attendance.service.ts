@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import {
   buildAttendanceBoard,
@@ -186,10 +187,7 @@ export class AttendanceService {
     allowedDepartmentIds?: string[];
     ownEmployeeId?: string;
   }> {
-    if (
-      caller.roles.includes('super_admin') ||
-      caller.roles.includes('hr_manager')
-    ) {
+    if (hasPermission(caller, 'attendance.read', 'org')) {
       return { isOrgScope: true };
     }
 
@@ -199,7 +197,11 @@ export class AttendanceService {
         caller.userId,
       );
 
-    if (isDepartmentHeadRole(caller.roles) && headedDepartmentIds.length > 0) {
+    if (
+      (isDepartmentHeadRole(caller.roles) ||
+        hasPermission(caller, 'attendance.read', 'department')) &&
+      headedDepartmentIds.length > 0
+    ) {
       return {
         isOrgScope: false,
         allowedDepartmentIds: headedDepartmentIds,

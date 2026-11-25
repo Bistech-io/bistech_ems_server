@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import type { AssignDepartmentHeadDto } from './dto/assign-department-head.dto.js';
 import type {
   CreateDepartmentDto,
@@ -19,13 +20,10 @@ export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   private checkManagePermission(caller: AuthenticatedUser) {
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isHrManager = caller.roles.includes('hr_manager');
-
-    if (!isSuperAdmin && !isHrManager) {
+    if (!hasPermission(caller, 'org.structure.manage', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only HR Managers or Super Admins can manage departments and designations',
+        message: 'You do not have permission to manage departments and designations',
       });
     }
   }
@@ -432,10 +430,10 @@ export class DepartmentsService {
     dto: AssignDepartmentHeadDto,
     caller: AuthenticatedUser,
   ) {
-    if (!caller.roles.includes('super_admin')) {
+    if (!hasPermission(caller, 'department.head.assign', 'org')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can assign or remove a department head',
+        message: 'You do not have permission to assign or remove a department head',
       });
     }
 

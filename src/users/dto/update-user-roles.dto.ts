@@ -1,19 +1,12 @@
 import { z } from 'zod';
+import { roleSlugSchema } from './role.dto.js';
 
 export const updateUserRolesSchema = z
   .object({
     roles: z
-      .array(
-        z.enum([
-          'super_admin',
-          'hr_manager',
-          'dept_head',
-          'department_head',
-          'employee',
-        ]),
-      )
+      .array(roleSlugSchema)
       .min(1, 'At least one role is required')
-      .max(5),
+      .max(10),
     departmentId: z.string().uuid('departmentId must be a valid UUID').optional(),
   })
   .strict();

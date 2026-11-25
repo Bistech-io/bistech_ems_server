@@ -12,6 +12,7 @@ import { RevokedReason } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import { AUTH_CONSTANTS } from './auth.constants.js';
 import type { AuthenticatedUser } from './auth.guard.js';
+import { mergeRolePermissionGrants } from './permission.utils.js';
 import { sortRolesByPriority } from './role.utils.js';
 import { LoginDto } from './dto/login.dto.js';
 import {
@@ -900,6 +901,51 @@ export class AuthService {
     }
   }
 
+  async resolveAccessContext(
+    userId: string,
+    organizationId: string,
+  ): Promise<{ roles: string[]; permissions: Record<string, string> } | null> {
+    if (!this.prisma.user?.findUnique) {
+      return null;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        organizationId_id: {
+          organizationId,
+          id: userId,
+        },
+      },
+      select: {
+        id: true,
+        accountStatus: true,
+        userRoles: {
+          select: {
+            role: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user || user.accountStatus !== 'active') {
+      throw new UnauthorizedException({
+        code: 'UNAUTHENTICATED',
+        message: 'User session invalid',
+      });
+    }
+
+    const roles = sortRolesByPriority(user.userRoles.map((ur) => ur.role.name));
+    const roleIds = user.userRoles.map((ur) => ur.role.id);
+    const permissions = await this.resolvePermissionsForRoles(roleIds);
+
+    return { roles, permissions };
+  }
+
   private async resolvePermissionsForRoles(roleIds: string[]): Promise<Record<string, string>> {
     if (roleIds.length === 0) return {};
 
@@ -912,25 +958,6 @@ export class AuthService {
       },
     });
 
-    const SCOPE_RANKS: Record<string, number> = {
-      own: 1,
-      team: 2,
-      department: 3,
-      managed: 4,
-      org: 5,
-    };
-
-    const map: Record<string, string> = {};
-    for (const rp of rolePerms) {
-      const key = rp.permission.key;
-      const scope = rp.scope;
-      const currentRank = map[key] ? SCOPE_RANKS[map[key]] || 0 : 0;
-      const newRank = SCOPE_RANKS[scope] || 0;
-      if (newRank > currentRank) {
-        map[key] = scope;
-      }
-    }
-
-    return map;
+    return mergeRolePermissionGrants(rolePerms);
   }
 }

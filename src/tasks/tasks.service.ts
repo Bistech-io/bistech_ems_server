@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
@@ -45,8 +46,10 @@ export class TasksService {
     idempotencyKey?: string,
   ) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.assign', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.assign', 'department'));
     const requestHash = this.hashPayload(dto);
 
     if (idempotencyKey) {
@@ -310,8 +313,10 @@ export class TasksService {
 
   async listTasks(caller: AuthenticatedUser, query: ListTasksQueryDto) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.read', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.read', 'department'));
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     const where: Record<string, unknown> = {
@@ -404,8 +409,10 @@ export class TasksService {
 
   async getTaskById(taskId: string, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.read', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.read', 'department'));
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     const task = await this.prisma.task.findUnique({
@@ -483,8 +490,10 @@ export class TasksService {
 
   async updateTask(taskId: string, dto: UpdateTaskDto, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.manage', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.manage', 'department'));
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     return this.prisma.$transaction(async (tx) => {
@@ -588,8 +597,10 @@ export class TasksService {
 
   async cancelTask(taskId: string, dto: CancelTaskDto, caller: AuthenticatedUser) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.manage', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.manage', 'department'));
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     return this.prisma.$transaction(async (tx) => {
@@ -824,8 +835,10 @@ export class TasksService {
 
   async getDepartmentBoard(caller: AuthenticatedUser, query: DepartmentBoardQueryDto) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.board.department', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.board.department', 'department'));
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     let targetDepartmentId: string | undefined = query.departmentId;
@@ -881,8 +894,10 @@ export class TasksService {
 
   async getTeamBoard(caller: AuthenticatedUser, query: TeamBoardQueryDto) {
     const orgId = caller.organizationId;
-    const isSuperAdmin = caller.roles.includes('super_admin');
-    const isDeptHead = isDepartmentHeadRole(caller.roles);
+    const isSuperAdmin = hasPermission(caller, 'task.board.team', 'org');
+    const isDeptHead =
+      isDepartmentHeadRole(caller.roles) ||
+      (!isSuperAdmin && hasPermission(caller, 'task.board.team', 'department'));
     const callerCtx = await this.tasksRepo.findCallerEmployeeContext(orgId, caller.userId);
 
     let targetTeamId = query.teamId;

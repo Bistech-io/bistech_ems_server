@@ -2,8 +2,13 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  Patch,
+  Post,
   Put,
   Query,
   Req,
@@ -13,6 +18,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { listUsersQuerySchema } from './dto/list-users-query.dto.js';
+import { createRoleSchema, updateRoleSchema } from './dto/role.dto.js';
 import { updateUserRolesSchema } from './dto/update-user-roles.dto.js';
 import { UsersService } from './users.service.js';
 
@@ -57,6 +63,105 @@ export class UsersController {
     return {
       success: true,
       message: 'Roles retrieved',
+      data,
+      meta: null,
+    };
+  }
+
+  @Get('permissions')
+  async listPermissions(@Req() req: Request) {
+    const data = await this.usersService.listPermissions(req.user!);
+
+    return {
+      success: true,
+      message: 'Permissions catalog retrieved',
+      data,
+      meta: null,
+    };
+  }
+
+  @Post('roles')
+  @HttpCode(HttpStatus.CREATED)
+  async createRole(@Body() body: unknown, @Req() req: Request) {
+    const parseResult = createRoleSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.usersService.createRole(parseResult.data, req.user!);
+
+    return {
+      success: true,
+      message: 'Custom role created successfully',
+      data,
+      meta: null,
+    };
+  }
+
+  @Patch('roles/:id')
+  async updateRole(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    if (!idCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [{ field: 'id', message: 'id must be a valid UUID' }],
+      });
+    }
+
+    const parseResult = updateRoleSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.usersService.updateRole(
+      idCheck.data,
+      parseResult.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: 'Custom role updated successfully',
+      data,
+      meta: null,
+    };
+  }
+
+  @Delete('roles/:id')
+  async deleteRole(@Param('id') id: string, @Req() req: Request) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    if (!idCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [{ field: 'id', message: 'id must be a valid UUID' }],
+      });
+    }
+
+    const data = await this.usersService.deleteRole(idCheck.data, req.user!);
+
+    return {
+      success: true,
+      message: 'Custom role deleted successfully',
       data,
       meta: null,
     };

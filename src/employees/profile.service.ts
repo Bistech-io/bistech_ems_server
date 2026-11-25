@@ -3,6 +3,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
+import { hasPermission } from '../auth/permission.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { UpdateEmployeeProfileDto } from './dto/update-employee-profile.dto.js';
 import {
@@ -151,8 +152,7 @@ export class ProfileService {
       });
     }
 
-    const isHrOrAdmin =
-      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+    const isHrOrAdmin = hasPermission(caller, 'employee.read.sensitive', 'org');
     const isOwner = employee.userId === caller.userId;
 
     // FSD T-16: Out-of-scope profile access returns 404 without leakage
@@ -194,8 +194,7 @@ export class ProfileService {
     dto: UpdateEmployeeProfileDto,
     caller: AuthenticatedUser,
   ): Promise<SensitiveEmployeeProfileDto> {
-    const isHrOrAdmin =
-      caller.roles.includes('super_admin') || caller.roles.includes('hr_manager');
+    const isHrOrAdmin = hasPermission(caller, 'employee.update', 'org');
 
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findUnique({
