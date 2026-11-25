@@ -12,6 +12,7 @@ import { RevokedReason } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service.js';
 import { AUTH_CONSTANTS } from './auth.constants.js';
 import type { AuthenticatedUser } from './auth.guard.js';
+import { sortRolesByPriority } from './role.utils.js';
 import { LoginDto } from './dto/login.dto.js';
 import {
   ForgotPasswordDto,
@@ -176,7 +177,7 @@ export class AuthService {
 
     // 7. Generate CSRF token & Access Token
     const csrfToken = crypto.randomBytes(24).toString('hex');
-    const roleNames = user.userRoles.map((ur) => ur.role.name);
+    const roleNames = sortRolesByPriority(user.userRoles.map((ur) => ur.role.name));
     const roleIds = user.userRoles.map((ur) => ur.role.id);
 
     const accessToken = await this.signAccessToken({
@@ -317,7 +318,9 @@ export class AuthService {
     });
 
     const csrfToken = crypto.randomBytes(24).toString('hex');
-    const roleNames = session.user.userRoles.map((ur) => ur.role.name);
+    const roleNames = sortRolesByPriority(
+      session.user.userRoles.map((ur) => ur.role.name),
+    );
     const roleIds = session.user.userRoles.map((ur) => ur.role.id);
 
     const accessToken = await this.signAccessToken({
@@ -395,7 +398,7 @@ export class AuthService {
       });
     }
 
-    const roleNames = user.userRoles.map((ur) => ur.role.name);
+    const roleNames = sortRolesByPriority(user.userRoles.map((ur) => ur.role.name));
     const roleIds = user.userRoles.map((ur) => ur.role.id);
     const permissions = await this.resolvePermissionsForRoles(roleIds);
 
