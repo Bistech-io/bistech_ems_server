@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import { hasPermission } from '../auth/permission.utils.js';
+import { isDepartmentHeadRole } from '../auth/role.utils.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
   CreateFeedbackCommentDto,
@@ -25,9 +26,18 @@ export class FeedbackService {
     return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   }
 
+  private canPostNotice(caller: AuthenticatedUser): boolean {
+    return (
+      caller.roles.includes('super_admin') ||
+      caller.roles.includes('hr_manager') ||
+      isDepartmentHeadRole(caller.roles)
+    );
+  }
+
   private mapItem(item: {
     id: string;
     organizationId: string;
+    isNotice?: boolean;
     kind: string;
     category: string;
     subject: string;
@@ -39,16 +49,19 @@ export class FeedbackService {
     updatedAt: Date;
     submitter: { id: string; displayName: string; email: string };
     handler: { id: string; displayName: string } | null;
+    _count?: { comments: number };
   }) {
     return {
       id: item.id,
       organizationId: item.organizationId,
+      isNotice: Boolean(item.isNotice),
       kind: item.kind,
       category: item.category,
       subject: item.subject,
       body: item.body,
       status: item.status,
       resolutionNote: item.resolutionNote,
+      commentCount: item._count?.comments ?? 0,
       submitter: item.submitter,
       handler: item.handler,
       handledAt: item.handledAt ? item.handledAt.toISOString() : null,
@@ -62,6 +75,14 @@ export class FeedbackService {
     caller: AuthenticatedUser,
     idempotencyKey?: string,
   ) {
+    const isNotice = Boolean(dto.isNotice);
+    if (isNotice && !this.canPostNotice(caller)) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only Super Admins, HR Managers, or Department Heads can post a notice',
+      });
+    }
+
     const orgId = caller.organizationId;
     const requestHash = this.hashPayload(dto);
 
@@ -92,7 +113,8 @@ export class FeedbackService {
         data: {
           organizationId: orgId,
           submittedBy: caller.userId,
-          kind: dto.kind,
+          isNotice,
+          kind: dto.kind ?? 'suggestion',
           category: dto.category,
           subject: dto.subject,
           body: dto.body,
@@ -101,6 +123,7 @@ export class FeedbackService {
         include: {
           submitter: { select: { id: true, displayName: true, email: true } },
           handler: { select: { id: true, displayName: true } },
+          _count: { select: { comments: true } },
         },
       });
 
@@ -108,11 +131,12 @@ export class FeedbackService {
         data: {
           organizationId: orgId,
           actorUserId: caller.userId,
-          action: 'feedback.submitted',
+          action: isNotice ? 'board.notice_posted' : 'feedback.submitted',
           entityType: 'feedback_item',
           entityId: created.id,
           metadata: {
-            kind: dto.kind,
+            isNotice,
+            kind: dto.kind ?? 'suggestion',
             category: dto.category,
           },
         },
@@ -143,6 +167,7 @@ export class FeedbackService {
     const orgId = caller.organizationId;
     const where = {
       organizationId: orgId,
+      ...(query.isNotice !== undefined ? { isNotice: query.isNotice } : {}),
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.category ? { category: query.category } : {}),
       ...(query.status ? { status: query.status } : {}),
@@ -156,10 +181,11 @@ export class FeedbackService {
         where,
         skip,
         take: query.limit,
-        orderBy: [{ createdAt: 'desc' }],
+        orderBy: [{ isNotice: 'desc' }, { createdAt: 'desc' }],
         include: {
           submitter: { select: { id: true, displayName: true, email: true } },
           handler: { select: { id: true, displayName: true } },
+          _count: { select: { comments: true } },
         },
       }),
     ]);
@@ -184,6 +210,7 @@ export class FeedbackService {
       include: {
         submitter: { select: { id: true, displayName: true, email: true } },
         handler: { select: { id: true, displayName: true } },
+        _count: { select: { comments: true } },
       },
     });
 
