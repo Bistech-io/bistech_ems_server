@@ -194,4 +194,30 @@ describe('ProfileService', () => {
       service.updateSensitiveProfile(EMP_ID, { city: 'Sylhet' }, OTHER_EMPLOYEE_CALLER),
     ).rejects.toThrow(NotFoundException);
   });
+
+  it('correctly maps dynamic work shift settings from organization settings without dummy fallbacks', async () => {
+    const rowWithOrg = {
+      ...makeEmployeeRow(),
+      organization: {
+        name: 'BisTech Corp',
+        timezone: 'Asia/Dhaka',
+        settings: {
+          workStart: '10:00',
+          workEnd: '18:30',
+          graceMinutes: 20,
+        },
+      },
+    };
+    const prisma = {
+      employee: { findUnique: vi.fn().mockResolvedValue(rowWithOrg) },
+    } as unknown as PrismaService;
+    const service = new ProfileService(prisma);
+    const profile = await service.getSensitiveProfile(EMP_ID, OWNER_CALLER);
+
+    expect(profile.organizationName).toBe('BisTech Corp');
+    expect(profile.timezone).toBe('Asia/Dhaka');
+    expect(profile.workStart).toBe('10:00');
+    expect(profile.workEnd).toBe('18:30');
+    expect(profile.graceMinutes).toBe(20);
+  });
 });

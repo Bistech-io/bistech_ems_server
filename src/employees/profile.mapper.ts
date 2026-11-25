@@ -11,6 +11,7 @@ export interface SensitiveEmployeeProfileDto {
   timezone?: string | null;
   workStart?: string | null;
   workEnd?: string | null;
+  graceMinutes?: number | null;
   dateOfBirth: string | null;
   personalEmail: string | null;
   personalPhone: string | null;
@@ -87,9 +88,23 @@ export function toSensitiveProfileDto(
           organizationName: employee.organization.name,
           timezone: employee.organization.timezone,
           workStart:
-            typeof attendance?.workStart === 'string' ? attendance.workStart : '09:00',
+            typeof orgSettings?.workStart === 'string'
+              ? orgSettings.workStart
+              : typeof attendance?.workStart === 'string'
+              ? attendance.workStart
+              : '10:00',
           workEnd:
-            typeof attendance?.workEnd === 'string' ? attendance.workEnd : '18:00',
+            typeof orgSettings?.workEnd === 'string'
+              ? orgSettings.workEnd
+              : typeof attendance?.workEnd === 'string'
+              ? attendance.workEnd
+              : '18:30',
+          graceMinutes:
+            typeof orgSettings?.graceMinutes === 'number'
+              ? orgSettings.graceMinutes
+              : typeof attendance?.graceMinutes === 'number'
+              ? attendance.graceMinutes
+              : 15,
         }
       : {}),
     dateOfBirth: p?.dateOfBirth ? p.dateOfBirth.toISOString().slice(0, 10) : null,
