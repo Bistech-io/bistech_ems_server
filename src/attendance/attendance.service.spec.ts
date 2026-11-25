@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
 import type { AttendanceRepository } from './attendance.repository.js';
 import { AttendanceService } from './attendance.service.js';
@@ -276,5 +276,100 @@ describe('AttendanceService', () => {
     await expect(service.getAttendanceById(empCaller, 'att-1')).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('records check-out for checked-in employee and returns updated record', async () => {
+    const checkInAt = new Date('2026-11-18T03:05:00Z');
+    const checkOutAt = new Date('2026-11-18T12:30:00Z');
+    const recordWebCheckOut = vi.fn().mockResolvedValue({
+      id: 'att-1',
+      workDate: new Date('2026-11-18T00:00:00Z'),
+      checkInAt,
+      checkOutAt,
+      status: 'present',
+      source: 'web',
+      lateMinutes: 0,
+      note: 'Wrapping up',
+    });
+
+    const repo = createMockRepo({
+      findRecordByDate: vi.fn().mockResolvedValue({
+        id: 'att-1',
+        workDate: new Date('2026-11-18T00:00:00Z'),
+        checkInAt,
+        checkOutAt: null,
+        status: 'present',
+        source: 'web',
+        lateMinutes: 0,
+        note: null,
+      }),
+      recordWebCheckOut,
+    });
+    const service = new AttendanceService(repo);
+
+    const result = await service.checkOut(ORG_ID, USER_ID, { note: 'Wrapping up' }, checkOutAt);
+
+    expect(result).toMatchObject({
+      id: 'att-1',
+      workDate: '2026-11-18',
+      checkInAt: checkInAt.toISOString(),
+      checkOutAt: checkOutAt.toISOString(),
+      status: 'present',
+      note: 'Wrapping up',
+      isDerived: false,
+    });
+    expect(recordWebCheckOut).toHaveBeenCalledWith({
+      id: 'att-1',
+      checkOutAt,
+      note: 'Wrapping up',
+    });
+  });
+
+  it('throws 409 NOT_CHECKED_IN on check-out when no check-in exists today', async () => {
+    const repo = createMockRepo({ findRecordByDate: vi.fn().mockResolvedValue(null) });
+    const service = new AttendanceService(repo);
+
+    await expect(
+      service.checkOut(ORG_ID, USER_ID, {}, new Date('2026-11-18T12:30:00Z')),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('throws 409 ALREADY_CHECKED_OUT on second check-out same day', async () => {
+    const repo = createMockRepo({
+      findRecordByDate: vi.fn().mockResolvedValue({
+        id: 'att-1',
+        workDate: new Date('2026-11-18T00:00:00Z'),
+        checkInAt: new Date('2026-11-18T03:05:00Z'),
+        checkOutAt: new Date('2026-11-18T12:00:00Z'),
+        status: 'present',
+        source: 'web',
+        lateMinutes: 0,
+        note: null,
+      }),
+    });
+    const service = new AttendanceService(repo);
+
+    await expect(
+      service.checkOut(ORG_ID, USER_ID, {}, new Date('2026-11-18T12:30:00Z')),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('throws 403 EMPLOYEE_INACTIVE when inactive employee attempts check-out', async () => {
+    const repo = createMockRepo({
+      findEmployeeContextByUserId: vi.fn().mockResolvedValue({
+        organizationId: ORG_ID,
+        timezone: 'Asia/Dhaka',
+        settings: {},
+        employeeId: EMP_ID,
+        employmentStatus: 'inactive',
+        joiningDate: new Date('2026-11-01T00:00:00Z'),
+        exitDate: null,
+      }),
+    });
+    const service = new AttendanceService(repo);
+
+    await expect(
+      service.checkOut(ORG_ID, USER_ID, {}, new Date('2026-11-18T12:30:00Z')),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

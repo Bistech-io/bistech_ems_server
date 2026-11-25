@@ -21,6 +21,7 @@ import {
 } from './dto/attendance-list-query.dto.js';
 import { attendanceMeQuerySchema } from './dto/attendance-me-query.dto.js';
 import { checkInSchema } from './dto/check-in.dto.js';
+import { checkOutSchema } from './dto/check-out.dto.js';
 
 const uuidParamSchema = z.string().uuid('id must be a valid UUID');
 
@@ -54,6 +55,36 @@ export class AttendanceController {
     return {
       success: true,
       message: 'Check-in recorded successfully',
+      data: record,
+      meta: null,
+    };
+  }
+
+  @Post('check-out')
+  @HttpCode(HttpStatus.OK)
+  async checkOut(@Req() req: Request, @Body() body: unknown) {
+    const parseResult = checkOutSchema.safeParse(body ?? {});
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const caller = req.user!;
+    const record = await this.attendanceService.checkOut(
+      caller.organizationId,
+      caller.userId,
+      parseResult.data,
+    );
+
+    return {
+      success: true,
+      message: 'Check-out recorded successfully',
       data: record,
       meta: null,
     };

@@ -86,7 +86,7 @@ All endpoints (except `/` and `/api/v1/health/db` or public auth routes) are ser
 | **Departments** | `/api/v1/departments`, `/api/v1/designations` | Department & designation CRUD, assign department head (`PUT /departments/:id/head`) |
 | **Teams** | `/api/v1/teams` | Team CRUD & member management (`POST/DELETE /teams/:id/members`) |
 | **Employees** | `/api/v1/employees` | Directory listing, onboarding, work-record updates, & sensitive profiles (`/me/profile`, `/:id/profile`) |
-| **Attendance** | `/api/v1/attendance` | Daily check-in (`POST /check-in`), personal board (`/me`), summary (`/summary`), org logs |
+| **Attendance** | `/api/v1/attendance` | Daily check-in (`POST /check-in`), check-out (`POST /check-out`), personal board (`/me`), summary (`/summary`), org logs |
 | **Tasks** | `/api/v1/tasks`, `/api/v1/task-assignments`, `/api/v1/task-submissions` | Task CRUD, `/me`, `/board/department`, `/board/team`, status transitions, submissions, reviews & comments |
 | **Feedback (Issues & Suggestions)** | `/api/v1/feedback` | Submit (`POST`), list company-wide items with author details (`GET`), view (`GET /:id`), triage (`PATCH /:id`), delete (`DELETE /:id`), & comments (`GET/POST /:id/comments`, `PATCH/DELETE /:id/comments/:commentId`) |
 | **Dashboard** | `/api/v1/dashboard` | Role-scoped analytics (`/me`, `/hr`, `/company`, `/summary`) |

@@ -120,6 +120,7 @@ export class AttendanceRepository {
         id: true,
         workDate: true,
         checkInAt: true,
+        checkOutAt: true,
         status: true,
         source: true,
         lateMinutes: true,
@@ -143,6 +144,7 @@ export class AttendanceRepository {
         id: true,
         workDate: true,
         checkInAt: true,
+        checkOutAt: true,
         status: true,
         source: true,
         lateMinutes: true,
@@ -175,6 +177,31 @@ export class AttendanceRepository {
         id: true,
         workDate: true,
         checkInAt: true,
+        checkOutAt: true,
+        status: true,
+        source: true,
+        lateMinutes: true,
+        note: true,
+      },
+    });
+  }
+
+  async recordWebCheckOut(input: {
+    id: string;
+    checkOutAt: Date;
+    note?: string;
+  }): Promise<StoredAttendanceRow> {
+    return this.prisma.attendanceRecord.update({
+      where: { id: input.id },
+      data: {
+        checkOutAt: input.checkOutAt,
+        ...(input.note !== undefined ? { note: input.note } : {}),
+      },
+      select: {
+        id: true,
+        workDate: true,
+        checkInAt: true,
+        checkOutAt: true,
         status: true,
         source: true,
         lateMinutes: true,

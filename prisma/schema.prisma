@@ -489,6 +489,7 @@ model AttendanceRecord {
   employeeId     String           @map("employee_id") @db.Uuid
   workDate       DateTime         @map("work_date") @db.Date
   checkInAt      DateTime?        @map("check_in_at") @db.Timestamptz()
+  checkOutAt     DateTime?        @map("check_out_at") @db.Timestamptz()
   status         AttendanceStatus
   source         AttendanceSource
   lateMinutes    Int              @default(0) @map("late_minutes")
