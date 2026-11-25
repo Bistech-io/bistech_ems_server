@@ -6,6 +6,7 @@ export interface AttendanceRecordDto {
   id: string | null;
   workDate: string;
   checkInAt: string | null;
+  checkOutAt?: string | null;
   status: AttendanceRecordStatus;
   source: AttendanceSource | null;
   lateMinutes: number;
@@ -17,6 +18,7 @@ export interface TodayAttendanceDto {
   workDate: string;
   status: TodayAttendanceStatus;
   checkInAt: string | null;
+  checkOutAt?: string | null;
   lateMinutes: number;
   source: AttendanceSource | null;
 }

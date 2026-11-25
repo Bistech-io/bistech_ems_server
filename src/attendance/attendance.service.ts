@@ -29,6 +29,7 @@ import type {
 } from './dto/attendance-list-query.dto.js';
 import type { AttendanceMeQueryDto } from './dto/attendance-me-query.dto.js';
 import type { CheckInDto } from './dto/check-in.dto.js';
+import type { CheckOutDto } from './dto/check-out.dto.js';
 
 @Injectable()
 export class AttendanceService {
@@ -111,6 +112,69 @@ export class AttendanceService {
       }
       throw error;
     }
+  }
+
+  async checkOut(
+    organizationId: string,
+    userId: string,
+    dto: CheckOutDto,
+    now: Date = new Date(),
+  ): Promise<AttendanceRecordDto> {
+    const context = await this.attendanceRepo.findEmployeeContextByUserId(
+      organizationId,
+      userId,
+    );
+    if (!context) {
+      throw new NotFoundException({
+        code: 'EMPLOYEE_NOT_FOUND',
+        message: 'Employee record not found for current user',
+      });
+    }
+    if (context.employmentStatus !== 'active') {
+      throw new ForbiddenException({
+        code: 'EMPLOYEE_INACTIVE',
+        message: 'Inactive employees cannot check out',
+      });
+    }
+
+    const { dateStr: workDate } = getOrgZonedParts(now, context.timezone);
+    const existing = await this.attendanceRepo.findRecordByDate(
+      organizationId,
+      context.employeeId,
+      workDate,
+    );
+
+    if (!existing || !existing.checkInAt) {
+      throw new ConflictException({
+        code: 'NOT_CHECKED_IN',
+        message: 'You must check in before checking out',
+      });
+    }
+
+    if (existing.checkOutAt) {
+      throw new ConflictException({
+        code: 'ALREADY_CHECKED_OUT',
+        message: `Check-out already recorded for ${workDate}`,
+      });
+    }
+
+    const updated = await this.attendanceRepo.recordWebCheckOut({
+      id: existing.id,
+      checkOutAt: now,
+      note: dto.note,
+    });
+
+    return {
+      id: updated.id,
+      workDate: toIsoDateString(updated.workDate),
+      checkInAt: updated.checkInAt ? updated.checkInAt.toISOString() : null,
+      checkOutAt: updated.checkOutAt ? updated.checkOutAt.toISOString() : null,
+      status: updated.status,
+      source: updated.source,
+      lateMinutes: updated.lateMinutes,
+      note: updated.note,
+      isDerived: false,
+    };
   }
 
   async getMyAttendanceBoard(

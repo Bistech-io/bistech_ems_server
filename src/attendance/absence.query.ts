@@ -17,6 +17,7 @@ export interface StoredAttendanceRow {
   id: string;
   workDate: Date;
   checkInAt: Date | null;
+  checkOutAt?: Date | null;
   status: AttendanceRecordStatus;
   source: AttendanceSource;
   lateMinutes: number;
@@ -206,6 +207,13 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
       checkInAt: input.todayStoredRow.checkInAt
         ? input.todayStoredRow.checkInAt.toISOString()
         : null,
+      ...(input.todayStoredRow.checkOutAt !== undefined
+        ? {
+            checkOutAt: input.todayStoredRow.checkOutAt
+              ? input.todayStoredRow.checkOutAt.toISOString()
+              : null,
+          }
+        : {}),
       lateMinutes: input.todayStoredRow.lateMinutes,
       source: input.todayStoredRow.source,
     };
@@ -255,6 +263,11 @@ export function buildAttendanceBoard(input: BuildAttendanceBoardInput): {
         id: stored.id,
         workDate: isoDate,
         checkInAt: stored.checkInAt ? stored.checkInAt.toISOString() : null,
+        ...(stored.checkOutAt !== undefined
+          ? {
+              checkOutAt: stored.checkOutAt ? stored.checkOutAt.toISOString() : null,
+            }
+          : {}),
         status: stored.status,
         source: stored.source,
         lateMinutes: stored.lateMinutes,
