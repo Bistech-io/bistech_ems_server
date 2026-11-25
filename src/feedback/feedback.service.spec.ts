@@ -236,4 +236,85 @@ describe('FeedbackService', () => {
     expect(deleteMock).toHaveBeenCalledTimes(3);
     expect(auditMock).toHaveBeenCalledTimes(3);
   });
+
+  it('lists, creates, updates, and deletes feedback comments with proper authorization', async () => {
+    const commentId = '77777777-7777-4777-8777-777777777777';
+    const commentRow = {
+      id: commentId,
+      organizationId: ORG_ID,
+      feedbackId: FEEDBACK_ID,
+      authorUserId: USER_EMP_ID,
+      body: 'We noticed the same issue on floor 2.',
+      createdAt: new Date('2026-11-25T11:00:00Z'),
+      updatedAt: new Date('2026-11-25T11:00:00Z'),
+      author: {
+        id: USER_EMP_ID,
+        displayName: 'Ashikur Rahman',
+        email: 'ashik@bistech.io',
+      },
+    };
+    const otherUser: AuthenticatedUser = {
+      userId: '55555555-5555-4555-8555-555555555555',
+      organizationId: ORG_ID,
+      sessionId: 'sess-other',
+      roles: ['employee'],
+    };
+
+    const prisma = {
+      feedbackItem: {
+        findFirst: vi.fn().mockResolvedValue({ id: FEEDBACK_ID }),
+      },
+      feedbackComment: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([commentRow]),
+      },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          feedbackItem: {
+            findFirst: vi.fn().mockResolvedValue({ id: FEEDBACK_ID }),
+          },
+          feedbackComment: {
+            create: vi.fn().mockResolvedValue(commentRow),
+            findFirst: vi.fn().mockResolvedValue(commentRow),
+            update: vi.fn().mockResolvedValue({ ...commentRow, body: 'Updated comment' }),
+            delete: vi.fn().mockResolvedValue({ id: commentId }),
+          },
+          auditLog: { create: vi.fn().mockResolvedValue({}) },
+        }),
+      ),
+    } as unknown as PrismaService;
+
+    const service = new FeedbackService(prisma);
+
+    const listRes = await service.listComments(FEEDBACK_ID, otherUser, { page: 1, limit: 20 });
+    expect(listRes.items).toHaveLength(1);
+    expect(listRes.items[0].author.displayName).toBe('Ashikur Rahman');
+
+    const created = await service.createComment(
+      FEEDBACK_ID,
+      { body: 'We noticed the same issue on floor 2.' },
+      EMPLOYEE_CALLER,
+    );
+    expect(created.id).toBe(commentId);
+
+    await expect(
+      service.updateComment(FEEDBACK_ID, commentId, { body: 'Hijack' }, otherUser),
+    ).rejects.toThrow(ForbiddenException);
+
+    const updated = await service.updateComment(
+      FEEDBACK_ID,
+      commentId,
+      { body: 'Updated comment' },
+      EMPLOYEE_CALLER,
+    );
+    expect(updated.body).toBe('Updated comment');
+
+    await expect(
+      service.deleteComment(FEEDBACK_ID, commentId, otherUser),
+    ).rejects.toThrow(ForbiddenException);
+
+    await expect(
+      service.deleteComment(FEEDBACK_ID, commentId, EMPLOYEE_CALLER),
+    ).resolves.toEqual({ id: commentId });
+  });
 });

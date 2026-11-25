@@ -45,8 +45,10 @@ const USERS_BY_ROLE: Record<string, AuthenticatedUser> = {
 describe('FeedbackController (HTTP)', () => {
   let app: INestApplication;
   let storedRows: Array<Record<string, unknown>>;
+  let storedComments: Array<Record<string, unknown>>;
 
   beforeEach(async () => {
+    storedComments = [];
     storedRows = [
       {
         id: FEEDBACK_ID,
@@ -97,6 +99,18 @@ describe('FeedbackController (HTTP)', () => {
             ) ?? null,
         ),
       },
+      feedbackComment: {
+        count: vi.fn(async ({ where }: { where: { feedbackId: string; organizationId: string } }) =>
+          storedComments.filter(
+            (c) => c.feedbackId === where.feedbackId && c.organizationId === where.organizationId,
+          ).length,
+        ),
+        findMany: vi.fn(async ({ where }: { where: { feedbackId: string; organizationId: string } }) =>
+          storedComments.filter(
+            (c) => c.feedbackId === where.feedbackId && c.organizationId === where.organizationId,
+          ),
+        ),
+      },
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
         fn({
           feedbackItem: {
@@ -141,6 +155,52 @@ describe('FeedbackController (HTTP)', () => {
             }),
             delete: vi.fn(async ({ where }: { where: { id: string } }) => {
               storedRows = storedRows.filter((r) => r.id !== where.id);
+              return { id: where.id };
+            }),
+          },
+          feedbackComment: {
+            create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+              const comment = {
+                id: '88888888-8888-4888-8888-888888888888',
+                organizationId: data.organizationId,
+                feedbackId: data.feedbackId,
+                authorUserId: data.authorUserId,
+                body: data.body,
+                createdAt: new Date('2026-11-25T11:00:00Z'),
+                updatedAt: new Date('2026-11-25T11:00:00Z'),
+                author: {
+                  id: data.authorUserId,
+                  displayName: 'Commenter',
+                  email: 'commenter@bistech.io',
+                },
+              };
+              storedComments.push(comment);
+              return comment;
+            }),
+            findFirst: vi.fn(
+              async ({
+                where,
+              }: {
+                where: { id: string; feedbackId: string; organizationId: string };
+              }) =>
+                storedComments.find(
+                  (c) =>
+                    c.id === where.id &&
+                    c.feedbackId === where.feedbackId &&
+                    c.organizationId === where.organizationId,
+                ) ?? null,
+            ),
+            update: vi.fn(
+              async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+                const comment = storedComments.find((c) => c.id === where.id)!;
+                Object.assign(comment, data, {
+                  updatedAt: new Date('2026-11-25T11:30:00Z'),
+                });
+                return comment;
+              },
+            ),
+            delete: vi.fn(async ({ where }: { where: { id: string } }) => {
+              storedComments = storedComments.filter((c) => c.id !== where.id);
               return { id: where.id };
             }),
           },
@@ -265,5 +325,57 @@ describe('FeedbackController (HTTP)', () => {
       .get(`/api/v1/feedback/${FEEDBACK_ID}`)
       .set('x-test-role', 'employee')
       .expect(404);
+  });
+
+  it('POST, GET, PATCH, DELETE /api/v1/feedback/:id/comments work end-to-end with authorization', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/v1/feedback/${FEEDBACK_ID}/comments`)
+      .set('x-test-role', 'employee')
+      .send({ body: '' })
+      .expect(400);
+
+    const createRes = await request(app.getHttpServer())
+      .post(`/api/v1/feedback/${FEEDBACK_ID}/comments`)
+      .set('x-test-role', 'employee')
+      .send({ body: 'Confirmed on 3rd floor as well.' })
+      .expect(201);
+
+    const commentId = createRes.body.data.id as string;
+    expect(createRes.body.success).toBe(true);
+    expect(createRes.body.data.body).toBe('Confirmed on 3rd floor as well.');
+
+    const listRes = await request(app.getHttpServer())
+      .get(`/api/v1/feedback/${FEEDBACK_ID}/comments`)
+      .set('x-test-role', 'other_dept_head')
+      .expect(200);
+
+    expect(listRes.body.data).toHaveLength(1);
+    expect(listRes.body.meta.total).toBe(1);
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/feedback/${FEEDBACK_ID}/comments/${commentId}`)
+      .set('x-test-role', 'other_dept_head')
+      .send({ body: 'Unauthorized edit' })
+      .expect(403);
+
+    const patchRes = await request(app.getHttpServer())
+      .patch(`/api/v1/feedback/${FEEDBACK_ID}/comments/${commentId}`)
+      .set('x-test-role', 'employee')
+      .send({ body: 'Updated: fixed after router restart.' })
+      .expect(200);
+
+    expect(patchRes.body.data.body).toBe('Updated: fixed after router restart.');
+
+    await request(app.getHttpServer())
+      .delete(`/api/v1/feedback/${FEEDBACK_ID}/comments/${commentId}`)
+      .set('x-test-role', 'other_dept_head')
+      .expect(403);
+
+    const delRes = await request(app.getHttpServer())
+      .delete(`/api/v1/feedback/${FEEDBACK_ID}/comments/${commentId}`)
+      .set('x-test-role', 'hr_manager')
+      .expect(200);
+
+    expect(delRes.body.data.id).toBe(commentId);
   });
 });

@@ -18,8 +18,11 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { AuthGuard } from '../auth/auth.guard.js';
 import {
+  createFeedbackCommentSchema,
   createFeedbackSchema,
+  listFeedbackCommentsQuerySchema,
   listFeedbackQuerySchema,
+  updateFeedbackCommentSchema,
   updateFeedbackSchema,
 } from './dto/feedback.dto.js';
 import { FeedbackService } from './feedback.service.js';
@@ -178,6 +181,173 @@ export class FeedbackController {
     return {
       success: true,
       message: 'Issue or suggestion deleted successfully',
+      data,
+      meta: null,
+    };
+  }
+
+  @Get(':id/comments')
+  async listComments(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Query() rawQuery: Record<string, unknown>,
+  ) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    if (!idCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [{ field: 'id', message: 'id must be a valid UUID' }],
+      });
+    }
+
+    const parseResult = listFeedbackCommentsQuerySchema.safeParse(rawQuery);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const { items, meta } = await this.feedbackService.listComments(
+      idCheck.data,
+      req.user!,
+      parseResult.data,
+    );
+
+    return {
+      success: true,
+      message: 'Feedback comments retrieved',
+      data: items,
+      meta,
+    };
+  }
+
+  @Post(':id/comments')
+  @HttpCode(HttpStatus.CREATED)
+  async createComment(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    if (!idCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [{ field: 'id', message: 'id must be a valid UUID' }],
+      });
+    }
+
+    const parseResult = createFeedbackCommentSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.feedbackService.createComment(
+      idCheck.data,
+      parseResult.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: 'Comment added successfully',
+      data,
+      meta: null,
+    };
+  }
+
+  @Patch(':id/comments/:commentId')
+  async updateComment(
+    @Param('id') id: string,
+    @Param('commentId') commentId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    const commentIdCheck = uuidParamSchema.safeParse(commentId);
+    if (!idCheck.success || !commentIdCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [
+          ...(!idCheck.success ? [{ field: 'id', message: 'id must be a valid UUID' }] : []),
+          ...(!commentIdCheck.success
+            ? [{ field: 'commentId', message: 'commentId must be a valid UUID' }]
+            : []),
+        ],
+      });
+    }
+
+    const parseResult = updateFeedbackCommentSchema.safeParse(body);
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const data = await this.feedbackService.updateComment(
+      idCheck.data,
+      commentIdCheck.data,
+      parseResult.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: 'Comment updated successfully',
+      data,
+      meta: null,
+    };
+  }
+
+  @Delete(':id/comments/:commentId')
+  async deleteComment(
+    @Param('id') id: string,
+    @Param('commentId') commentId: string,
+    @Req() req: Request,
+  ) {
+    const idCheck = uuidParamSchema.safeParse(id);
+    const commentIdCheck = uuidParamSchema.safeParse(commentId);
+    if (!idCheck.success || !commentIdCheck.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: [
+          ...(!idCheck.success ? [{ field: 'id', message: 'id must be a valid UUID' }] : []),
+          ...(!commentIdCheck.success
+            ? [{ field: 'commentId', message: 'commentId must be a valid UUID' }]
+            : []),
+        ],
+      });
+    }
+
+    const data = await this.feedbackService.deleteComment(
+      idCheck.data,
+      commentIdCheck.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: 'Comment deleted successfully',
       data,
       meta: null,
     };

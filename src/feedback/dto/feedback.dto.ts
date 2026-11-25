@@ -57,3 +57,27 @@ export const updateFeedbackSchema = z
   );
 
 export type UpdateFeedbackDto = z.infer<typeof updateFeedbackSchema>;
+
+export const createFeedbackCommentSchema = z
+  .object({
+    body: z
+      .string()
+      .trim()
+      .min(1, 'Comment body is required')
+      .max(2000, 'Comment cannot exceed 2000 characters'),
+  })
+  .strict();
+
+export type CreateFeedbackCommentDto = z.infer<typeof createFeedbackCommentSchema>;
+
+export const updateFeedbackCommentSchema = createFeedbackCommentSchema;
+export type UpdateFeedbackCommentDto = CreateFeedbackCommentDto;
+
+export const listFeedbackCommentsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export type ListFeedbackCommentsQueryDto = z.infer<
+  typeof listFeedbackCommentsQuerySchema
+>;

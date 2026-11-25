@@ -154,7 +154,6 @@ model Organization {
   holidays      Holiday[]
   employees     Employee[]
   auditLogs     AuditLog[]
-  usersInfo     UserInfo[]
 
   @@map("organizations")
 }
@@ -177,7 +176,6 @@ model User {
   organization Organization @relation(fields: [organizationId], references: [id])
 
   employee                   Employee?
-  userInfo                   UserInfo?
   userRoles                  UserRole[]                   @relation("UserRolesTarget")
   userRolesAssigned          UserRole[]                   @relation("UserRoleAssigner")
   sessions                   UserSession[]
@@ -194,6 +192,7 @@ model User {
   taskStatusEventsActed      TaskStatusEvent[]            @relation("TaskStatusEventActor")
   feedbackItemsSubmitted     FeedbackItem[]               @relation("FeedbackSubmitter")
   feedbackItemsHandled       FeedbackItem[]               @relation("FeedbackHandler")
+  feedbackComments           FeedbackComment[]            @relation("FeedbackCommentAuthor")
   notifications              Notification[]
   auditLogsActed             AuditLog[]                   @relation("AuditLogActor")
   idempotencyKeys            IdempotencyKey[]
@@ -436,29 +435,6 @@ model EmployeeProfile {
   @@map("employee_profiles")
 }
 
-model UserInfo {
-  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId                   String    @unique @map("user_id") @db.Uuid
-  organizationId           String    @map("organization_id") @db.Uuid
-  personalEmail            String?   @map("personal_email") @db.Text
-  personalPhone            String?   @map("personal_phone") @db.Text
-  dateOfBirth              DateTime? @map("date_of_birth") @db.Date
-  addressLine              String?   @map("address_line") @db.Text
-  city                     String?   @db.Text
-  countryCode              String?   @map("country_code") @db.Char(2)
-  emergencyContactName     String?   @map("emergency_contact_name") @db.Text
-  emergencyContactPhone    String?   @map("emergency_contact_phone") @db.Text
-  emergencyContactRelation String?   @map("emergency_contact_relation") @db.Text
-  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt                DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
-
-  user         User         @relation(fields: [organizationId, userId], references: [organizationId, id], onDelete: Cascade)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, userId])
-  @@map("users_info")
-}
-
 model EmployeeEmploymentHistory {
   id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String           @map("organization_id") @db.Uuid
@@ -697,12 +673,30 @@ model FeedbackItem {
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
-  submitter User  @relation("FeedbackSubmitter", fields: [organizationId, submittedBy], references: [organizationId, id])
-  handler   User? @relation("FeedbackHandler", fields: [organizationId, handledBy], references: [organizationId, id])
+  submitter User              @relation("FeedbackSubmitter", fields: [organizationId, submittedBy], references: [organizationId, id])
+  handler   User?             @relation("FeedbackHandler", fields: [organizationId, handledBy], references: [organizationId, id])
+  comments  FeedbackComment[]
 
+  @@unique([organizationId, id])
   @@index([organizationId, status, createdAt(sort: Desc)])
   @@index([submittedBy, createdAt(sort: Desc)])
   @@map("feedback_items")
+}
+
+model FeedbackComment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  feedbackId     String   @map("feedback_id") @db.Uuid
+  authorUserId   String   @map("author_user_id") @db.Uuid
+  body           String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  feedback FeedbackItem @relation(fields: [organizationId, feedbackId], references: [organizationId, id], onDelete: Cascade)
+  author   User         @relation("FeedbackCommentAuthor", fields: [organizationId, authorUserId], references: [organizationId, id])
+
+  @@index([feedbackId, createdAt, id])
+  @@map("feedback_comments")
 }
 
 model Notification {

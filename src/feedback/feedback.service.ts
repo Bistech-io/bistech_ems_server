@@ -8,8 +8,11 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type {
+  CreateFeedbackCommentDto,
   CreateFeedbackDto,
+  ListFeedbackCommentsQueryDto,
   ListFeedbackQueryDto,
+  UpdateFeedbackCommentDto,
   UpdateFeedbackDto,
 } from './dto/feedback.dto.js';
 
@@ -299,6 +302,229 @@ export class FeedbackService {
             kind: existing.kind,
             submittedBy: existing.submittedBy,
           },
+        },
+      });
+
+      return { id: existing.id };
+    });
+  }
+
+  private mapComment(comment: {
+    id: string;
+    feedbackId: string;
+    body: string;
+    createdAt: Date;
+    updatedAt: Date;
+    author: { id: string; displayName: string; email: string };
+  }) {
+    return {
+      id: comment.id,
+      feedbackId: comment.feedbackId,
+      body: comment.body,
+      author: comment.author,
+      createdAt: comment.createdAt.toISOString(),
+      updatedAt: comment.updatedAt.toISOString(),
+    };
+  }
+
+  async listComments(
+    feedbackId: string,
+    caller: AuthenticatedUser,
+    query: ListFeedbackCommentsQueryDto,
+  ) {
+    const feedback = await this.prisma.feedbackItem.findFirst({
+      where: {
+        id: feedbackId,
+        organizationId: caller.organizationId,
+      },
+      select: { id: true },
+    });
+
+    if (!feedback) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Issue or suggestion not found',
+      });
+    }
+
+    const where = {
+      organizationId: caller.organizationId,
+      feedbackId: feedback.id,
+    };
+    const skip = (query.page - 1) * query.limit;
+
+    const [total, rows] = await Promise.all([
+      this.prisma.feedbackComment.count({ where }),
+      this.prisma.feedbackComment.findMany({
+        where,
+        skip,
+        take: query.limit,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: {
+          author: { select: { id: true, displayName: true, email: true } },
+        },
+      }),
+    ]);
+
+    return {
+      items: rows.map((row) => this.mapComment(row)),
+      meta: {
+        page: query.page,
+        limit: query.limit,
+        total,
+        totalPages: Math.ceil(total / query.limit),
+      },
+    };
+  }
+
+  async createComment(
+    feedbackId: string,
+    dto: CreateFeedbackCommentDto,
+    caller: AuthenticatedUser,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const feedback = await tx.feedbackItem.findFirst({
+        where: {
+          id: feedbackId,
+          organizationId: caller.organizationId,
+        },
+        select: { id: true },
+      });
+
+      if (!feedback) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Issue or suggestion not found',
+        });
+      }
+
+      const comment = await tx.feedbackComment.create({
+        data: {
+          organizationId: caller.organizationId,
+          feedbackId: feedback.id,
+          authorUserId: caller.userId,
+          body: dto.body,
+        },
+        include: {
+          author: { select: { id: true, displayName: true, email: true } },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: caller.organizationId,
+          actorUserId: caller.userId,
+          action: 'feedback.commented',
+          entityType: 'feedback_comment',
+          entityId: comment.id,
+          metadata: { feedbackId: feedback.id },
+        },
+      });
+
+      return this.mapComment(comment);
+    });
+  }
+
+  async updateComment(
+    feedbackId: string,
+    commentId: string,
+    dto: UpdateFeedbackCommentDto,
+    caller: AuthenticatedUser,
+  ) {
+    const isSuperAdmin = caller.roles.includes('super_admin');
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.feedbackComment.findFirst({
+        where: {
+          id: commentId,
+          feedbackId,
+          organizationId: caller.organizationId,
+        },
+      });
+
+      if (!existing) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Comment not found',
+        });
+      }
+
+      const isAuthor = existing.authorUserId === caller.userId;
+      if (!isAuthor && !isSuperAdmin) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: 'Only the comment author or Super Admins can edit this comment',
+        });
+      }
+
+      const updated = await tx.feedbackComment.update({
+        where: { id: existing.id },
+        data: { body: dto.body },
+        include: {
+          author: { select: { id: true, displayName: true, email: true } },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: caller.organizationId,
+          actorUserId: caller.userId,
+          action: 'feedback.comment_updated',
+          entityType: 'feedback_comment',
+          entityId: updated.id,
+          metadata: { feedbackId },
+        },
+      });
+
+      return this.mapComment(updated);
+    });
+  }
+
+  async deleteComment(
+    feedbackId: string,
+    commentId: string,
+    caller: AuthenticatedUser,
+  ) {
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isHrManager = caller.roles.includes('hr_manager');
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.feedbackComment.findFirst({
+        where: {
+          id: commentId,
+          feedbackId,
+          organizationId: caller.organizationId,
+        },
+      });
+
+      if (!existing) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Comment not found',
+        });
+      }
+
+      const isAuthor = existing.authorUserId === caller.userId;
+      if (!isAuthor && !isSuperAdmin && !isHrManager) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message:
+            'Only the comment author, HR Managers, or Super Admins can delete this comment',
+        });
+      }
+
+      await tx.feedbackComment.delete({
+        where: { id: existing.id },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: caller.organizationId,
+          actorUserId: caller.userId,
+          action: 'feedback.comment_deleted',
+          entityType: 'feedback_comment',
+          entityId: existing.id,
+          metadata: { feedbackId, authorUserId: existing.authorUserId },
         },
       });
 
