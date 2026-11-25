@@ -87,9 +87,17 @@ export function toSensitiveProfileDto(
           organizationName: employee.organization.name,
           timezone: employee.organization.timezone,
           workStart:
-            typeof attendance?.workStart === 'string' ? attendance.workStart : '09:00',
+            typeof orgSettings?.workStart === 'string'
+              ? orgSettings.workStart
+              : typeof attendance?.workStart === 'string'
+                ? attendance.workStart
+                : '10:00',
           workEnd:
-            typeof attendance?.workEnd === 'string' ? attendance.workEnd : '18:00',
+            typeof orgSettings?.workEnd === 'string'
+              ? orgSettings.workEnd
+              : typeof attendance?.workEnd === 'string'
+                ? attendance.workEnd
+                : '18:30',
         }
       : {}),
     dateOfBirth: p?.dateOfBirth ? p.dateOfBirth.toISOString().slice(0, 10) : null,
