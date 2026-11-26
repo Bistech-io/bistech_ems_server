@@ -753,6 +753,7 @@ All 28 domain tables, composite uniqueness constraints, relationships, and enums
 | `0010_users_info.sql` | `users_info` table for personal profile details |
 | `0011_feedback_notice_board.sql` | `feedback_items.is_notice` flag + notice board sort index |
 | `0012_feedback_comments.sql` | `feedback_items (organization_id, id)` unique index + `feedback_comments` table |
+| `0013_office_ip_attendance_security.sql` | `organizations.allowed_office_ips` IP/CIDR allowlist + `attendance_records.check_out_at`, `check_in_ip`, `check_out_ip` |
 
 ### 7.4 Final DDL
 

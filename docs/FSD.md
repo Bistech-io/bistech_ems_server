@@ -174,9 +174,9 @@ Error: `{ "success": false, "error": { "code", "message", "details": [{ "field",
 | 200/201/202/204 | none | success, created, accepted, no body |
 | 400 | BAD_REQUEST | malformed JSON/request |
 | 401 | UNAUTHENTICATED, TOKEN_EXPIRED, INVALID_CREDENTIALS | missing/expired/invalid credentials (login message identical for unknown user and wrong password) |
-| 403 | FORBIDDEN, ACCOUNT_LOCKED, ACCOUNT_DISABLED, CSRF_FAILED, SELF_MODIFICATION_NOT_ALLOWED | not allowed |
+| 403 | FORBIDDEN, ACCOUNT_LOCKED, ACCOUNT_DISABLED, CSRF_FAILED, SELF_MODIFICATION_NOT_ALLOWED, OUTSIDE_OFFICE_NETWORK | not allowed (including outside-office attendance check-in/check-out) |
 | 404 | NOT_FOUND | missing or out of scope |
-| 409 | CONFLICT, DUPLICATE_RESOURCE, ALREADY_CHECKED_IN, INVALID_TASK_TRANSITION, ALREADY_REVIEWED, DEPARTMENT_HEAD_REQUIRED, LAST_SUPER_ADMIN | state conflicts |
+| 409 | CONFLICT, DUPLICATE_RESOURCE, ALREADY_CHECKED_IN, NOT_CHECKED_IN, ALREADY_CHECKED_OUT, INVALID_TASK_TRANSITION, ALREADY_REVIEWED, DEPARTMENT_HEAD_REQUIRED, LAST_SUPER_ADMIN | state conflicts |
 | 422 | VALIDATION_ERROR, OTP_INVALID, SELF_REVIEW_NOT_ALLOWED, TEAM_EMPTY, ASSIGNEE_INACTIVE, IDEMPOTENCY_KEY_REUSED | invalid content/rule |
 | 429 | RATE_LIMITED | with Retry-After |
 | 500/503 | INTERNAL_ERROR, SERVICE_UNAVAILABLE | no internals in body |
@@ -228,32 +228,35 @@ No `DELETE /employees/{id}`.
 | PATCH, DELETE | /designations/{id} | manage (DELETE archives) |
 | GET, POST | /holidays | read / manage (filter year) |
 | DELETE | /holidays/{id} | manage |
-| GET | /organization/settings | Authenticated (Super Admin, HR Manager, Dept Head, Employee): read workStart, graceMinutes, workEnd, weekendDays, timezone, name, slug |
-| PATCH | /organization/settings | org.settings.manage (Super Admin, HR Manager): dynamically update workStart, graceMinutes, workEnd, weekendDays, timezone |
-| GET, PATCH | /organization | org.settings.manage (name, timezone, work start, grace, work end, weekend days, employee code prefix) |
+| GET | /organization/settings | Authenticated: read shift settings, `ipRestrictionEnabled`; privileged callers (`super_admin`, `admin`, `hr_manager`) also receive `allowedOfficeIps` and `currentIp` |
+| PATCH | /organization/settings | `org.settings.manage` (`super_admin`, `admin`, `hr_manager`): update shift timings, timezone, weekend days, and `allowedOfficeIps` |
+| GET, PATCH | /organization | org.settings.manage (name, timezone, work start, grace, work end, weekend days, allowedOfficeIps, employee code prefix) |
 
-#### Organization Work Schedule & Shift Settings (`/organization/settings` & `/admin/organization`)
+#### Organization Work Schedule, Shift & Office IP Security Settings (`/organization/settings` & `/admin/organization`)
 - **GET `/organization/settings`**:
   - **Permission**: Any authenticated session.
-  - **Returns**: `{ workStart: string, graceMinutes: number, workEnd: string, weekendDays: number[], timezone: string, name: string, slug: string }`.
+  - **Returns**: `{ workStart: string, graceMinutes: number, workEnd: string, weekendDays: number[], timezone: string, name: string, slug: string, ipRestrictionEnabled: boolean, allowedOfficeIps: string[], currentIp: string | null }`.
+  - **Redaction Rule**: `allowedOfficeIps` is returned only to privileged roles (`super_admin`, `admin`, `hr_manager`, or `org.settings.manage`); non-privileged callers receive `[]` so the office IP allowlist is never leaked to regular employees.
 - **PATCH `/organization/settings`**:
-  - **Permission**: `org.settings.manage` (granted to Super Admin and HR Manager).
+  - **Permission**: `org.settings.manage` (granted to Super Admin, Admin, and HR Manager).
   - **Payload**:
     - `workStart` (optional): `HH:mm` 24-hour format (`^([01]\\d|2[0-3]):[0-5]\\d$`), e.g. `"09:00"`.
     - `graceMinutes` (optional): integer `0` to `180` minutes, e.g. `15`.
     - `workEnd` (optional): `HH:mm` 24-hour format (`^([01]\\d|2[0-3]):[0-5]\\d$`), must be strictly after `workStart`, e.g. `"18:00"`.
     - `timezone` (optional): valid IANA timezone identifier string, e.g. `"Asia/Dhaka"` or `"UTC"`.
     - `weekendDays` (optional): array of ISO weekdays `1` (Monday) to `7` (Sunday), unique, non-empty, e.g. `[5, 6]`.
+    - `allowedOfficeIps` (optional): array of valid IPv4, IPv6, or CIDR strings (max 50 unique entries, e.g. `["203.0.113.42", "203.0.113.0/24"]`). Empty array disables IP restriction.
   - **Validation & Business Rules**:
     - `workStart` must be strictly earlier than `workEnd`.
     - `graceMinutes` must be an integer between `0` and `180`.
     - `timezone` must pass standard IANA timezone validation (`Intl.DateTimeFormat(undefined, { timeZone })`).
+    - Each entry in `allowedOfficeIps` must be a valid IPv4, IPv6, or CIDR block; duplicates are removed.
     - Updates to shift timings and weekend days are persisted into `organizations.settings` JSONB under tenant isolation.
-    - Updates to `timezone` are persisted directly to the `organizations.timezone` column.
-    - An audit entry is recorded in `audit_logs` (`action: "organization.settings.updated"`, `entityType: "organization"`), capturing previous and updated snapshots including `timezone`.
-    - Changes take effect immediately across check-ins, live timers, stopwatches, and dynamic attendance absence calculations.
+    - Updates to `timezone` and `allowedOfficeIps` are persisted directly to `organizations.timezone` and `organizations.allowed_office_ips`.
+    - An audit entry is recorded in `audit_logs` (`action: "organization.settings.updated"`, `entityType: "organization"`), capturing previous and updated snapshots including `timezone` and `allowedOfficeIps`.
+    - Changes take effect immediately across check-ins, check-outs, live timers, stopwatches, and dynamic attendance absence calculations.
 - **UI Screen (`/admin/organization`)**:
-  - Protected by `<RoleGuard allowedRoles={['super_admin']}>` and `org.settings.manage`.
+  - Protected by `<RoleGuard allowedRoles={['super_admin', 'admin', 'hr_manager']}>` and `org.settings.manage`.
   - **Top Navigation Banner**: Displays dynamic pill badge: `Active Shift: {workStart} - {workEnd}` formatted in 12-hour AM/PM.
   - **Dynamic Work Shift Settings Card**:
     - Seasonal presets:
@@ -261,10 +264,13 @@ No `DELETE /employees/{id}`.
       - Winter Shift: 09:00 AM – 05:00 PM (`09:00` - `17:00`)
     - Custom Inputs: Shift Start Time (`workStart`), Shift End Time (`workEnd`), Late Grace Period (`graceMinutes`), Organization Timezone (`timezone`).
     - Error & Feedback banners: Displays API error reasons clearly when validation fails, or green confirmation banner upon successful update.
-  - **Active Schedule Summary Card**:
+  - **Office Network IP Security Card** (Super Admin, Admin, HR Manager only):
+    - Displays current enforcement status (`Active` vs `Unrestricted`), the caller's detected IP with a 1-click **Add Current IP** action, an IP/CIDR insert field with validation, removable IP tags, and **Save Office IPs**.
+  - **Active Schedule & Security Summary Card**:
     - Shift Window: `{workStart} - {workEnd}` (12-hour AM/PM format).
     - Grace Period: `{graceMinutes} minutes`.
     - Timezone: `{timezone}`.
+    - Office IP Security: `Active ({count} IPs)` or `Unrestricted`.
 
 
 ### Users, roles, audit (Super Admin)
@@ -283,8 +289,9 @@ No `DELETE /employees/{id}`.
 ### Attendance
 | Method | Endpoint | Perm | Notes |
 |---|---|---|---|
-| POST | /attendance/check-in | attendance.self | server time only; 409 ALREADY_CHECKED_IN |
-| GET | /attendance/me | attendance.self | from, to; past working days without a record returned as derived absent (`isDerived: true`) |
+| POST | /attendance/check-in | attendance.self | server time only; enforces `organizations.allowed_office_ips` (403 `OUTSIDE_OFFICE_NETWORK`); records `check_in_ip`; 409 `ALREADY_CHECKED_IN` |
+| POST | /attendance/check-out | attendance.self | server time only; enforces `organizations.allowed_office_ips` (403 `OUTSIDE_OFFICE_NETWORK`); records `check_out_ip`; 409 `NOT_CHECKED_IN` / `ALREADY_CHECKED_OUT` |
+| GET | /attendance/me | attendance.self | from, to; returns `networkStatus: { isRestricted, isAllowed }` without leaking IP allowlist; past working days without a record returned as derived absent (`isDerived: true`) |
 | GET | /attendance | attendance.read | employeeId, departmentId, from, to, status; absent includes derived |
 | GET | /attendance/summary | attendance.read | groupBy day or month |
 | GET | /attendance/{id} | attendance.read | stored records only |
@@ -407,7 +414,7 @@ Counts filtered by caller scope; "today" uses org timezone; one shared implement
 
 | Table | Key columns | Constraints and notes |
 |---|---|---|
-| organizations | id, name, slug, timezone, settings JSONB, employee_code_prefix, last_employee_number | unique slug; settings: work start, grace, work end, weekend days; counter incremented under row lock |
+| organizations | id, name, slug, timezone, settings JSONB, allowed_office_ips TEXT[], employee_code_prefix, last_employee_number | unique slug; settings: work start, grace, work end, weekend days; `allowed_office_ips` enforces office-only attendance check-in/out; counter incremented under row lock |
 | users | id, organization_id, email, display_name, password_hash, account_status, failed_login_count, locked_until, last_login_at | unique (org, lower(email)); active requires hash |
 | roles | id, organization_id, name, is_system | unique (org, name); 4 seeded |
 | permissions | id, key, description | global; 32 rows |
@@ -423,7 +430,7 @@ Counts filtered by caller scope; "today" uses org timezone; one shared implement
 | employee_profiles | employee_id, date_of_birth, personal_email, personal_phone, address_line, city, country_code, emergency_contact_* | one row per employee; sensitive |
 | users_info | id, user_id, organization_id, personal_email, personal_phone, date_of_birth, address_line, city, country_code, emergency_contact_* | one row per user; sensitive personal details |
 | employee_employment_history | id, employee_id, event_type, effective_date, old_value, new_value, reason, changed_by | append-only |
-| attendance_records | id, employee_id, work_date, check_in_at, status, source, late_minutes | unique (employee_id, work_date); no check_out/worked_minutes |
+| attendance_records | id, employee_id, work_date, check_in_at, check_out_at, check_in_ip, check_out_ip, status, source, late_minutes | unique (employee_id, work_date); stores client IP for check-in/check-out auditability |
 | attendance_corrections | id, employee_id, attendance_record_id (nullable), work_date, corrected_check_in_at, corrected_status, reason, original_snapshot JSONB, corrected_by | append-only; reason 10 to 500 |
 | teams | id, organization_id, department_id, name, description, created_by, archived_at | unique (department_id, lower(name)) where not archived |
 | team_members | id, organization_id, team_id, employee_id, added_by, added_at, removed_at | partial unique (team_id, employee_id) WHERE removed_at IS NULL; trigger: employee dept = team dept |
