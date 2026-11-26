@@ -30,7 +30,8 @@ export class FeedbackService {
     return (
       caller.roles.includes('super_admin') ||
       caller.roles.includes('hr_manager') ||
-      isDepartmentHeadRole(caller.roles)
+      isDepartmentHeadRole(caller.roles) ||
+      hasPermission(caller, 'feedback.manage', 'org')
     );
   }
 
