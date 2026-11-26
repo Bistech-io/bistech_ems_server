@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EmployeesService } from './employees.service.js';
 import type { PrismaService } from '../database/prisma.service.js';
@@ -222,5 +222,106 @@ describe('EmployeesService', () => {
     expect(empUpdate).toHaveBeenCalled();
     expect(historyCreate).toHaveBeenCalled();
     expect(auditCreate).toHaveBeenCalled();
+  });
+
+  it('freezes and unfreezes employee account, revoking sessions on freeze, and rejects self-freeze or employee caller', async () => {
+    const userUpdate = vi.fn().mockResolvedValue({});
+    const sessionUpdateMany = vi.fn().mockResolvedValue({ count: 2 });
+    const auditCreate = vi.fn().mockResolvedValue({});
+    let currentAccountStatus = 'active';
+
+    const prisma = {
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+        cb({
+          employee: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'emp-101',
+              userId: 'user-101',
+              user: {
+                id: 'user-101',
+                accountStatus: currentAccountStatus,
+                userRoles: [{ role: { name: 'employee' } }],
+              },
+            }),
+          },
+          user: {
+            update: vi.fn(async (args: { data: { accountStatus: string } }) => {
+              currentAccountStatus = args.data.accountStatus;
+              return userUpdate(args);
+            }),
+          },
+          userSession: { updateMany: sessionUpdateMany },
+          auditLog: { create: auditCreate },
+        }),
+      ),
+      employee: {
+        findUnique: vi.fn(async () => ({
+          id: 'emp-101',
+          employeeCode: 'BST-1010',
+          firstName: 'Test',
+          lastName: 'Employee',
+          workEmail: 'test@bistech.io',
+          phone: null,
+          employmentType: 'full_time',
+          employmentStatus: 'active',
+          joiningDate: new Date('2026-11-23'),
+          createdAt: new Date(),
+          department: { id: 'dept-1', name: 'Engineering' },
+          designation: { id: 'desig-1', title: 'Engineer' },
+          user: {
+            id: 'user-101',
+            username: 'test.emp',
+            displayName: 'Test Employee',
+            email: 'test@bistech.io',
+            accountStatus: currentAccountStatus,
+            userRoles: [{ role: { name: 'employee' } }],
+          },
+        })),
+      },
+    } as unknown as PrismaService;
+
+    const hrService = new EmployeesService(prisma);
+    const hrCaller: AuthenticatedUser = {
+      userId: 'hr-1',
+      organizationId: 'org-1',
+      sessionId: 'sess-1',
+      roles: ['hr_manager'],
+    };
+    const empCaller: AuthenticatedUser = {
+      userId: 'user-101',
+      organizationId: 'org-1',
+      sessionId: 'sess-2',
+      roles: ['employee'],
+    };
+    const selfAdminCaller: AuthenticatedUser = {
+      userId: 'user-101',
+      organizationId: 'org-1',
+      sessionId: 'sess-3',
+      roles: ['super_admin'],
+    };
+
+    await expect(
+      hrService.updateEmployeeAccountStatus('emp-101', { frozen: true }, empCaller),
+    ).rejects.toThrow(ForbiddenException);
+
+    await expect(
+      hrService.updateEmployeeAccountStatus('emp-101', { frozen: true }, selfAdminCaller),
+    ).rejects.toThrow(BadRequestException);
+
+    const frozenRes = await hrService.updateEmployeeAccountStatus(
+      'emp-101',
+      { frozen: true, reason: 'Policy review' },
+      hrCaller,
+    );
+    expect(frozenRes.user.accountStatus).toBe('suspended');
+    expect(sessionUpdateMany).toHaveBeenCalledTimes(1);
+
+    const unfrozenRes = await hrService.updateEmployeeAccountStatus(
+      'emp-101',
+      { frozen: false },
+      hrCaller,
+    );
+    expect(unfrozenRes.user.accountStatus).toBe('active');
+    expect(auditCreate).toHaveBeenCalledTimes(2);
   });
 });

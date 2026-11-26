@@ -17,6 +17,7 @@ import type { Request } from 'express';
 import { AuthGuard } from '../auth/auth.guard.js';
 import { EmployeesService } from './employees.service.js';
 import { createEmployeeSchema } from './dto/create-employee.dto.js';
+import { updateEmployeeAccountStatusSchema } from './dto/account-status.dto.js';
 import { updateEmployeeSchema } from './dto/update-employee.dto.js';
 import { EmploymentStatus } from '@prisma/client';
 
@@ -125,6 +126,40 @@ export class EmployeesController {
     return {
       success: true,
       message: 'Employee updated successfully',
+      data: employee,
+      meta: null,
+    };
+  }
+
+  @Patch(':id/account-status')
+  async updateEmployeeAccountStatus(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
+    const parseResult = updateEmployeeAccountStatusSchema.safeParse(body ?? {});
+    if (!parseResult.success) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: parseResult.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const employee = await this.employeesService.updateEmployeeAccountStatus(
+      id,
+      parseResult.data,
+      req.user!,
+    );
+
+    return {
+      success: true,
+      message: parseResult.data.frozen
+        ? 'Employee account frozen successfully'
+        : 'Employee account unfrozen successfully',
       data: employee,
       meta: null,
     };
