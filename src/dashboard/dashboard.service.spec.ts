@@ -214,4 +214,51 @@ describe('DashboardService', () => {
     expect(summary.hr).toBeNull();
     expect(summary.me?.employee.employeeCode).toBe('BST-00142');
   });
+
+  it('returns company summary for custom admin role with org governance permissions and no employee profile', async () => {
+    const repo = createMockRepo({
+      findEmployeeProfileByUserId: vi.fn().mockResolvedValue(null),
+    });
+    const service = new DashboardService(repo);
+    const customAdminCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-custom-admin',
+      roles: ['admin'],
+      permissions: { 'org.settings.manage': 'org', 'user.read': 'org' },
+    };
+
+    const summary = await service.getSummaryDashboard(
+      customAdminCaller,
+      new Date('2026-11-18T04:00:00Z'),
+    );
+
+    expect(summary.primaryRole).toBe('super_admin');
+    expect(summary.company).not.toBeNull();
+    expect(summary.me).toBeNull();
+  });
+
+  it('does not throw 404 for custom role account with limited permissions and no employee profile', async () => {
+    const repo = createMockRepo({
+      findEmployeeProfileByUserId: vi.fn().mockResolvedValue(null),
+    });
+    const service = new DashboardService(repo);
+    const customViewerCaller: AuthenticatedUser = {
+      userId: USER_ID,
+      organizationId: ORG_ID,
+      sessionId: 'sess-custom-viewer',
+      roles: ['admin'],
+      permissions: { 'feedback.read': 'own' },
+    };
+
+    const summary = await service.getSummaryDashboard(
+      customViewerCaller,
+      new Date('2026-11-18T04:00:00Z'),
+    );
+
+    expect(summary.primaryRole).toBe('employee');
+    expect(summary.company).toBeNull();
+    expect(summary.hr).toBeNull();
+    expect(summary.me).toBeNull();
+  });
 });

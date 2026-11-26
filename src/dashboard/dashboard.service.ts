@@ -19,9 +19,41 @@ import { computeCompanyDashboardMetrics } from './metrics/company.metrics.js';
 import { computeEmployeeDashboardMetrics } from './metrics/employee.metrics.js';
 import { computeHrDashboardMetrics } from './metrics/hr.metrics.js';
 
+const SYSTEM_ROLE_SET = new Set([
+  'super_admin',
+  'hr_manager',
+  'dept_head',
+  'department_head',
+  'employee',
+]);
+
 @Injectable()
 export class DashboardService {
   constructor(private readonly dashboardRepo: DashboardRepository) {}
+
+  private hasCustomRole(caller: AuthenticatedUser): boolean {
+    return caller.roles.some((role) => !SYSTEM_ROLE_SET.has(role));
+  }
+
+  private canViewCompanyDashboard(caller: AuthenticatedUser): boolean {
+    return (
+      caller.roles.includes('super_admin') ||
+      hasPermission(caller, 'role.manage', 'org') ||
+      (this.hasCustomRole(caller) &&
+        (hasPermission(caller, 'org.settings.manage', 'org') ||
+          hasPermission(caller, 'audit.read', 'org')))
+    );
+  }
+
+  private canViewHrDashboard(caller: AuthenticatedUser): boolean {
+    return (
+      hasPermission(caller, 'dashboard.read', 'org') ||
+      (this.hasCustomRole(caller) &&
+        (hasPermission(caller, 'employee.read', 'org') ||
+          hasPermission(caller, 'attendance.read', 'org') ||
+          hasPermission(caller, 'user.read', 'org')))
+    );
+  }
 
   async getMyOverviewDashboard(
     organizationId: string,
@@ -83,7 +115,7 @@ export class DashboardService {
     caller: AuthenticatedUser,
     now: Date = new Date(),
   ): Promise<HrDashboardResponseDto> {
-    if (!hasPermission(caller, 'dashboard.read', 'org')) {
+    if (!this.canViewHrDashboard(caller)) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'You do not have permission to access the HR overview dashboard',
@@ -144,10 +176,7 @@ export class DashboardService {
     caller: AuthenticatedUser,
     now: Date = new Date(),
   ): Promise<CompanyDashboardResponseDto> {
-    if (
-      !caller.roles.includes('super_admin') &&
-      !hasPermission(caller, 'role.manage', 'org')
-    ) {
+    if (!this.canViewCompanyDashboard(caller)) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'Only Super Admins or role administrators can access the company dashboard',
@@ -222,15 +251,19 @@ export class DashboardService {
     caller: AuthenticatedUser,
     now: Date = new Date(),
   ): Promise<SummaryDashboardResponseDto> {
-    const isSuperAdmin =
-      caller.roles.includes('super_admin') ||
-      hasPermission(caller, 'role.manage', 'org');
+    const isSuperAdmin = this.canViewCompanyDashboard(caller);
     const isHrManager =
-      caller.roles.includes('hr_manager') ||
-      (!isSuperAdmin && hasPermission(caller, 'dashboard.read', 'org'));
+      !isSuperAdmin &&
+      (caller.roles.includes('hr_manager') || this.canViewHrDashboard(caller));
     const isDeptHead =
       isDepartmentHeadRole(caller.roles) ||
-      (!isSuperAdmin && !isHrManager && hasPermission(caller, 'dashboard.read', 'department'));
+      (!isSuperAdmin &&
+        !isHrManager &&
+        (hasPermission(caller, 'dashboard.read', 'department') ||
+          (this.hasCustomRole(caller) &&
+            (hasPermission(caller, 'team.read', 'department') ||
+              hasPermission(caller, 'task.read', 'department') ||
+              hasPermission(caller, 'attendance.read', 'department')))));
 
     const primaryRole: SummaryDashboardResponseDto['primaryRole'] = isSuperAdmin
       ? 'super_admin'
@@ -289,14 +322,10 @@ export class DashboardService {
       };
     }
 
-    const me = await this.getMyOverviewDashboard(
-      caller.organizationId,
-      caller.userId,
-      now,
-    );
+    const me = await tryGetMe();
     return {
       primaryRole,
-      availableViews,
+      availableViews: me ? availableViews : availableViews.filter((v) => v !== 'me'),
       company: null,
       hr: null,
       me,
