@@ -148,6 +148,7 @@ model Organization {
   slug               String   @unique @db.Text
   timezone           String   @default("Asia/Dhaka") @db.Text
   settings           Json     @default("{\"workStart\":\"10:00\",\"graceMinutes\":15,\"workEnd\":\"18:30\",\"weekendDays\":[5,6]}")
+  allowedOfficeIps   String[] @default([]) @map("allowed_office_ips")
   employeeCodePrefix String   @default("BST") @map("employee_code_prefix") @db.Text
   lastEmployeeNumber Int      @default(0) @map("last_employee_number")
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
@@ -497,6 +498,8 @@ model AttendanceRecord {
   workDate       DateTime         @map("work_date") @db.Date
   checkInAt      DateTime?        @map("check_in_at") @db.Timestamptz()
   checkOutAt     DateTime?        @map("check_out_at") @db.Timestamptz()
+  checkInIp      String?          @map("check_in_ip") @db.Text
+  checkOutIp     String?          @map("check_out_ip") @db.Text
   status         AttendanceStatus
   source         AttendanceSource
   lateMinutes    Int              @default(0) @map("late_minutes")

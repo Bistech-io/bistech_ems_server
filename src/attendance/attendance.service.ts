@@ -7,6 +7,7 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
 import { hasPermission } from '../auth/permission.utils.js';
 import { isDepartmentHeadRole } from '../auth/role.utils.js';
+import { isIpAllowed } from '../common/utils/ip.util.js';
 import {
   buildAttendanceBoard,
   evaluateCheckInPunctuality,
@@ -41,6 +42,7 @@ export class AttendanceService {
     userId: string,
     dto: CheckInDto,
     now: Date = new Date(),
+    clientIp: string | null = null,
   ): Promise<AttendanceRecordDto> {
     const context = await this.attendanceRepo.findEmployeeContextByUserId(
       organizationId,
@@ -56,6 +58,15 @@ export class AttendanceService {
       throw new ForbiddenException({
         code: 'EMPLOYEE_INACTIVE',
         message: 'Inactive employees cannot check in',
+      });
+    }
+
+    const allowlist = context.allowedOfficeIps ?? [];
+    if (allowlist.length > 0 && !isIpAllowed(clientIp, allowlist)) {
+      throw new ForbiddenException({
+        code: 'OUTSIDE_OFFICE_NETWORK',
+        message:
+          'Check-in is only allowed from the office network. Please connect to office Wi-Fi or LAN and try again.',
       });
     }
 
@@ -87,6 +98,7 @@ export class AttendanceService {
         status,
         lateMinutes,
         note: dto.note,
+        ...(clientIp ? { checkInIp: clientIp } : {}),
       });
 
       return {
@@ -120,6 +132,7 @@ export class AttendanceService {
     userId: string,
     dto: CheckOutDto,
     now: Date = new Date(),
+    clientIp: string | null = null,
   ): Promise<AttendanceRecordDto> {
     const context = await this.attendanceRepo.findEmployeeContextByUserId(
       organizationId,
@@ -135,6 +148,15 @@ export class AttendanceService {
       throw new ForbiddenException({
         code: 'EMPLOYEE_INACTIVE',
         message: 'Inactive employees cannot check out',
+      });
+    }
+
+    const allowlist = context.allowedOfficeIps ?? [];
+    if (allowlist.length > 0 && !isIpAllowed(clientIp, allowlist)) {
+      throw new ForbiddenException({
+        code: 'OUTSIDE_OFFICE_NETWORK',
+        message:
+          'Check-out is only allowed from the office network. Please connect to office Wi-Fi or LAN and try again.',
       });
     }
 
@@ -163,6 +185,7 @@ export class AttendanceService {
       id: existing.id,
       checkOutAt: now,
       note: dto.note,
+      ...(clientIp ? { checkOutIp: clientIp } : {}),
     });
 
     return {
@@ -183,6 +206,7 @@ export class AttendanceService {
     userId: string,
     query: AttendanceMeQueryDto,
     now: Date = new Date(),
+    clientIp: string | null = null,
   ): Promise<AttendanceBoardResponseDto> {
     const context = await this.attendanceRepo.findEmployeeContextByUserId(
       organizationId,
@@ -233,6 +257,8 @@ export class AttendanceService {
       todayStoredRow,
     });
 
+    const allowlist = context.allowedOfficeIps ?? [];
+
     return {
       timezone: context.timezone,
       workStart: settings.workStart,
@@ -240,6 +266,10 @@ export class AttendanceService {
       workEnd: settings.workEnd,
       from,
       to,
+      networkStatus: {
+        isRestricted: allowlist.length > 0,
+        isAllowed: isIpAllowed(clientIp, allowlist),
+      },
       today: board.today,
       summary: board.summary,
       records: board.records,

@@ -18,6 +18,7 @@ Test IDs (T-xx) are defined in FSD.md section 12 and used by FTL.md.
 | Injection / XSS | Parameterized queries; Zod validation pipe; React output encoding; https-only links; CSP + headers |
 | Sensitive data exposure | Separate sensitive table + permission; explicit response DTOs; log redaction; encrypted backups |
 | Insider misuse | DB-enforced reviewer check; self-modification bans; append-only audit; audited role changes |
+| Off-site attendance spoofing | Server-enforced office IP/CIDR allowlist (`organizations.allowed_office_ips`) on `POST /attendance/check-in` and `POST /attendance/check-out` (403 `OUTSIDE_OFFICE_NETWORK`); client IP recorded on attendance rows; allowlist editable only by Super Admin / Admin / HR and redacted from regular employees |
 | Abuse / DoS | Edge/WAF; per-route throttling; body size and statement timeouts |
 | Supply chain / config | Dependency audit in CI; secret scanning; secret manager; separate environments |
 | Data loss | PITR, encrypted off-site backups, tested restores |
@@ -171,6 +172,7 @@ Phase is MVP unless marked Later. Mark done when implemented **and** when its te
 | S-37 | Encrypted off-account backups with PITR; failure alerts | T-34 |
 | S-38 | Restore tested before go-live and quarterly vs RTO | T-34 |
 | S-39 | Incident contact list + breach procedure | Review |
+| S-40 | Office network IP/CIDR allowlist enforced server-side on attendance check-in and check-out (403 `OUTSIDE_OFFICE_NETWORK`); allowlist managed only by Super Admin / Admin / HR and audited | Unit + HTTP |
 
 ## 11. Open security items
 Gmail OAuth2 vs app password and sender domain (Q9); MFA timing (Q13); on-call and breach contacts (Q15); retention/legal review (Q11, K12); OTP, lockout and rate-limit values are proposals, unmeasured.

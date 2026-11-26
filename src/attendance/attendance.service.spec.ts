@@ -360,6 +360,7 @@ describe('AttendanceService', () => {
         organizationId: ORG_ID,
         timezone: 'Asia/Dhaka',
         settings: {},
+        allowedOfficeIps: [],
         employeeId: EMP_ID,
         employmentStatus: 'inactive',
         joiningDate: new Date('2026-11-01T00:00:00Z'),
@@ -371,5 +372,93 @@ describe('AttendanceService', () => {
     await expect(
       service.checkOut(ORG_ID, USER_ID, {}, new Date('2026-11-18T12:30:00Z')),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('blocks check-in and check-out with 403 OUTSIDE_OFFICE_NETWORK when client IP is not in allowedOfficeIps', async () => {
+    const repo = createMockRepo({
+      findEmployeeContextByUserId: vi.fn().mockResolvedValue({
+        organizationId: ORG_ID,
+        timezone: 'Asia/Dhaka',
+        settings: {
+          workStart: '09:00',
+          graceMinutes: 15,
+          workEnd: '18:00',
+          weekendDays: [5, 6],
+        },
+        allowedOfficeIps: ['203.0.113.42', '103.45.20.0/24'],
+        employeeId: EMP_ID,
+        employmentStatus: 'active',
+        joiningDate: new Date('2026-11-01T00:00:00Z'),
+        exitDate: null,
+      }),
+    });
+    const service = new AttendanceService(repo);
+
+    await expect(
+      service.checkIn(ORG_ID, USER_ID, {}, new Date('2026-11-18T03:05:00Z'), '198.51.100.99'),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'OUTSIDE_OFFICE_NETWORK' }),
+    });
+
+    await expect(
+      service.checkOut(ORG_ID, USER_ID, {}, new Date('2026-11-18T12:30:00Z'), '198.51.100.99'),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'OUTSIDE_OFFICE_NETWORK' }),
+    });
+  });
+
+  it('allows check-in from an allowed office IP and reports networkStatus in getMyAttendanceBoard', async () => {
+    const createWebCheckIn = vi.fn().mockImplementation(async (input) => ({
+      id: 'att-ip-1',
+      workDate: new Date(`${input.workDateIso}T00:00:00Z`),
+      checkInAt: input.checkInAt,
+      status: input.status,
+      source: 'web',
+      lateMinutes: input.lateMinutes,
+      note: input.note ?? null,
+    }));
+    const repo = createMockRepo({
+      findEmployeeContextByUserId: vi.fn().mockResolvedValue({
+        organizationId: ORG_ID,
+        timezone: 'Asia/Dhaka',
+        settings: {
+          workStart: '09:00',
+          graceMinutes: 15,
+          workEnd: '18:00',
+          weekendDays: [5, 6],
+        },
+        allowedOfficeIps: ['203.0.113.0/24'],
+        employeeId: EMP_ID,
+        employmentStatus: 'active',
+        joiningDate: new Date('2026-11-01T00:00:00Z'),
+        exitDate: null,
+      }),
+      createWebCheckIn,
+    });
+    const service = new AttendanceService(repo);
+    const now = new Date('2026-11-18T03:05:00Z');
+
+    await service.checkIn(ORG_ID, USER_ID, {}, now, '203.0.113.77');
+    expect(createWebCheckIn).toHaveBeenCalledWith(
+      expect.objectContaining({ checkInIp: '203.0.113.77' }),
+    );
+
+    const insideBoard = await service.getMyAttendanceBoard(
+      ORG_ID,
+      USER_ID,
+      {},
+      now,
+      '203.0.113.77',
+    );
+    expect(insideBoard.networkStatus).toEqual({ isRestricted: true, isAllowed: true });
+
+    const outsideBoard = await service.getMyAttendanceBoard(
+      ORG_ID,
+      USER_ID,
+      {},
+      now,
+      '198.51.100.12',
+    );
+    expect(outsideBoard.networkStatus).toEqual({ isRestricted: true, isAllowed: false });
   });
 });

@@ -20,6 +20,7 @@ describe('OrganizationService', () => {
     name: 'BisTech',
     slug: 'bistech',
     timezone: 'Asia/Dhaka',
+    allowedOfficeIps: [] as string[],
     settings: {
       workStart: '10:00',
       graceMinutes: 15,
@@ -80,7 +81,27 @@ describe('OrganizationService', () => {
         timezone: 'Asia/Dhaka',
         name: 'BisTech',
         slug: 'bistech',
+        allowedOfficeIps: [],
+        ipRestrictionEnabled: false,
+        currentIp: null,
       });
+    });
+
+    it('redacts allowedOfficeIps and currentIp for regular employees while exposing them to admin/hr/super_admin', async () => {
+      mockPrisma.organization.findUnique.mockResolvedValue({
+        ...mockOrg,
+        allowedOfficeIps: ['203.0.113.10'],
+      });
+
+      const empResult = await service.getSettings('org-uuid-1', employeeCaller, '203.0.113.10');
+      expect(empResult.ipRestrictionEnabled).toBe(true);
+      expect(empResult.allowedOfficeIps).toEqual([]);
+      expect(empResult.currentIp).toBeNull();
+
+      const hrResult = await service.getSettings('org-uuid-1', hrCaller, '203.0.113.10');
+      expect(hrResult.ipRestrictionEnabled).toBe(true);
+      expect(hrResult.allowedOfficeIps).toEqual(['203.0.113.10']);
+      expect(hrResult.currentIp).toBe('203.0.113.10');
     });
 
     it('throws NotFoundException if organization does not exist', async () => {
@@ -175,6 +196,48 @@ describe('OrganizationService', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(mockPrisma.organization.update).not.toHaveBeenCalled();
+    });
+
+    it('allows admin role to update allowedOfficeIps and audits the change', async () => {
+      const adminRoleCaller: AuthenticatedUser = {
+        userId: 'user-org-admin-uuid',
+        organizationId: 'org-uuid-1',
+        sessionId: 'session-4',
+        roles: ['admin'],
+      };
+      mockPrisma.organization.findUnique.mockResolvedValue(mockOrg);
+      mockPrisma.organization.update.mockResolvedValue({
+        ...mockOrg,
+        allowedOfficeIps: ['203.0.113.42', '103.45.20.0/24'],
+      });
+
+      const result = await service.updateSettings(
+        'org-uuid-1',
+        { allowedOfficeIps: ['203.0.113.42', '103.45.20.0/24'] },
+        adminRoleCaller,
+        '203.0.113.42',
+      );
+
+      expect(result.allowedOfficeIps).toEqual(['203.0.113.42', '103.45.20.0/24']);
+      expect(result.ipRestrictionEnabled).toBe(true);
+      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
+        where: { id: 'org-uuid-1' },
+        data: expect.objectContaining({
+          allowedOfficeIps: ['203.0.113.42', '103.45.20.0/24'],
+        }),
+      });
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'organization.settings.updated',
+          ipAddress: '203.0.113.42',
+          metadata: expect.objectContaining({
+            previous: expect.objectContaining({ allowedOfficeIps: [] }),
+            updated: expect.objectContaining({
+              allowedOfficeIps: ['203.0.113.42', '103.45.20.0/24'],
+            }),
+          }),
+        }),
+      });
     });
 
     it('allows super_admin to update settings and timezone and logs audit with previous and updated timezone', async () => {

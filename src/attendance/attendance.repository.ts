@@ -6,6 +6,7 @@ export interface EmployeeAttendanceContext {
   organizationId: string;
   timezone: string;
   settings: unknown;
+  allowedOfficeIps: string[];
   employeeId: string;
   employmentStatus: 'active' | 'inactive';
   joiningDate: Date;
@@ -53,20 +54,26 @@ const FULL_RECORD_SELECT = {
   checkOutAt: true,
 } as const;
 
-function isMissingCheckOutColumnError(err: unknown): boolean {
+function isMissingAttendanceSecurityColumnError(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
   const record = err as { code?: unknown; message?: unknown };
   if (record.code === 'P2022') return true;
-  return typeof record.message === 'string' && record.message.includes('check_out_at');
+  if (typeof record.message !== 'string') return false;
+  return (
+    record.message.includes('check_out_at') ||
+    record.message.includes('check_in_ip') ||
+    record.message.includes('check_out_ip') ||
+    record.message.includes('allowed_office_ips')
+  );
 }
 
 @Injectable()
 export class AttendanceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async ensureCheckOutColumn(): Promise<void> {
+  private async ensureAttendanceSecurityColumns(): Promise<void> {
     await this.prisma.$executeRawUnsafe(
-      'ALTER TABLE "attendance_records" ADD COLUMN IF NOT EXISTS "check_out_at" TIMESTAMPTZ',
+      'ALTER TABLE "attendance_records" ADD COLUMN IF NOT EXISTS "check_out_at" TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS "check_in_ip" TEXT, ADD COLUMN IF NOT EXISTS "check_out_ip" TEXT',
     );
   }
 
@@ -74,25 +81,62 @@ export class AttendanceRepository {
     organizationId: string,
     userId: string,
   ): Promise<EmployeeAttendanceContext | null> {
-    const employee = await this.prisma.employee.findFirst({
-      where: {
-        userId,
-        organizationId,
-      },
-      select: {
-        id: true,
-        organizationId: true,
-        employmentStatus: true,
-        joiningDate: true,
-        exitDate: true,
-        organization: {
-          select: {
-            timezone: true,
-            settings: true,
+    let employee: {
+      id: string;
+      organizationId: string;
+      employmentStatus: 'active' | 'inactive';
+      joiningDate: Date;
+      exitDate: Date | null;
+      organization: {
+        timezone: string;
+        settings: unknown;
+        allowedOfficeIps?: string[];
+      };
+    } | null;
+
+    try {
+      employee = await this.prisma.employee.findFirst({
+        where: {
+          userId,
+          organizationId,
+        },
+        select: {
+          id: true,
+          organizationId: true,
+          employmentStatus: true,
+          joiningDate: true,
+          exitDate: true,
+          organization: {
+            select: {
+              timezone: true,
+              settings: true,
+              allowedOfficeIps: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      if (!isMissingAttendanceSecurityColumnError(err)) throw err;
+      employee = await this.prisma.employee.findFirst({
+        where: {
+          userId,
+          organizationId,
+        },
+        select: {
+          id: true,
+          organizationId: true,
+          employmentStatus: true,
+          joiningDate: true,
+          exitDate: true,
+          organization: {
+            select: {
+              timezone: true,
+              settings: true,
+            },
+          },
+        },
+      });
+    }
 
     if (!employee) {
       return null;
@@ -102,6 +146,9 @@ export class AttendanceRepository {
       organizationId: employee.organizationId,
       timezone: employee.organization.timezone,
       settings: employee.organization.settings,
+      allowedOfficeIps: Array.isArray(employee.organization.allowedOfficeIps)
+        ? employee.organization.allowedOfficeIps
+        : [],
       employeeId: employee.id,
       employmentStatus: employee.employmentStatus,
       joiningDate: employee.joiningDate,
@@ -149,7 +196,7 @@ export class AttendanceRepository {
         select: FULL_RECORD_SELECT,
       });
     } catch (err) {
-      if (!isMissingCheckOutColumnError(err)) throw err;
+      if (!isMissingAttendanceSecurityColumnError(err)) throw err;
       return this.prisma.attendanceRecord.findMany({
         where,
         orderBy: { workDate: 'asc' },
@@ -174,7 +221,7 @@ export class AttendanceRepository {
         select: FULL_RECORD_SELECT,
       });
     } catch (err) {
-      if (!isMissingCheckOutColumnError(err)) throw err;
+      if (!isMissingAttendanceSecurityColumnError(err)) throw err;
       return this.prisma.attendanceRecord.findFirst({
         where,
         select: BASE_RECORD_SELECT,
@@ -190,8 +237,9 @@ export class AttendanceRepository {
     status: 'present' | 'late';
     lateMinutes: number;
     note?: string;
+    checkInIp?: string | null;
   }): Promise<StoredAttendanceRow> {
-    const data = {
+    const baseData = {
       organizationId: input.organizationId,
       employeeId: input.employeeId,
       workDate: new Date(`${input.workDateIso}T00:00:00Z`),
@@ -201,15 +249,19 @@ export class AttendanceRepository {
       lateMinutes: input.lateMinutes,
       note: input.note ?? null,
     };
+    const dataWithIp = {
+      ...baseData,
+      ...(input.checkInIp ? { checkInIp: input.checkInIp } : {}),
+    };
     try {
       return await this.prisma.attendanceRecord.create({
-        data,
+        data: dataWithIp,
         select: FULL_RECORD_SELECT,
       });
     } catch (err) {
-      if (!isMissingCheckOutColumnError(err)) throw err;
+      if (!isMissingAttendanceSecurityColumnError(err)) throw err;
       return this.prisma.attendanceRecord.create({
-        data,
+        data: baseData,
         select: BASE_RECORD_SELECT,
       });
     }
@@ -219,10 +271,12 @@ export class AttendanceRepository {
     id: string;
     checkOutAt: Date;
     note?: string;
+    checkOutIp?: string | null;
   }): Promise<StoredAttendanceRow> {
     const data = {
       checkOutAt: input.checkOutAt,
       ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.checkOutIp ? { checkOutIp: input.checkOutIp } : {}),
     };
     try {
       return await this.prisma.attendanceRecord.update({
@@ -231,8 +285,8 @@ export class AttendanceRepository {
         select: FULL_RECORD_SELECT,
       });
     } catch (err) {
-      if (!isMissingCheckOutColumnError(err)) throw err;
-      await this.ensureCheckOutColumn();
+      if (!isMissingAttendanceSecurityColumnError(err)) throw err;
+      await this.ensureAttendanceSecurityColumns();
       return this.prisma.attendanceRecord.update({
         where: { id: input.id },
         data,
