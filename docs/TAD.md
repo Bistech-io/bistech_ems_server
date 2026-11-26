@@ -370,10 +370,10 @@ modules/tasks/                                  owns: tasks, task_assignments, t
 ├── tasks.lifecycle.handler.ts                  EmployeeLifecycleHandler: cancels assignments, notifies creators
 ├── dto/  events/ (task.assigned, task.submitted, task.reviewed, task.commented, task.cancelled)  *.spec.ts
 
-modules/feedback/                               owns: feedback_items
+modules/feedback/                               owns: feedback_items, feedback_comments
 ├── index.ts, feedback.module.ts
-├── feedback.controller.ts, feedback.service.ts, feedback.repository.ts
-├── dto/  events/ (feedback.submitted, feedback.handled)  *.spec.ts
+├── feedback.controller.ts, feedback.service.ts
+├── dto/  events/ (feedback.submitted, board.notice_posted, feedback.handled)  *.spec.ts
 
 modules/notifications/                          owns: notifications
 ├── index.ts, notifications.module.ts
@@ -750,6 +750,9 @@ All 28 domain tables, composite uniqueness constraints, relationships, and enums
 | `0007_triggers.sql` | `updated_at` triggers; append-only triggers on 5 immutable tables |
 | `0008_functions.sql` | `managed_employee_ids()` |
 | `0009_grants.sql` | least-privilege grants for `ems_app` |
+| `0010_users_info.sql` | `users_info` table for personal profile details |
+| `0011_feedback_notice_board.sql` | `feedback_items.is_notice` flag + notice board sort index |
+| `0012_feedback_comments.sql` | `feedback_items (organization_id, id)` unique index + `feedback_comments` table |
 
 ### 7.4 Final DDL
 
@@ -1249,6 +1252,7 @@ CREATE TABLE feedback_items (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL,
   submitted_by    uuid NOT NULL,
+  is_notice       boolean NOT NULL DEFAULT false,
   kind            text NOT NULL CHECK (kind IN ('issue','suggestion')),
   category        text NOT NULL CHECK (category IN ('general','attendance','tasks','system','workplace','other')),
   subject         text NOT NULL CHECK (char_length(subject) BETWEEN 5 AND 150),
@@ -1259,12 +1263,27 @@ CREATE TABLE feedback_items (
   handled_at      timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT feedback_items_org_id_uniq UNIQUE (organization_id, id),
   CONSTRAINT feedback_submitter_fk FOREIGN KEY (organization_id, submitted_by) REFERENCES users (organization_id, id),
   CONSTRAINT feedback_handler_fk   FOREIGN KEY (organization_id, handled_by)   REFERENCES users (organization_id, id),
   CONSTRAINT feedback_handled_shape CHECK (status = 'open' OR (handled_by IS NOT NULL AND handled_at IS NOT NULL))
 );
+CREATE INDEX idx_feedback_items_org_notice_created ON feedback_items (organization_id, is_notice, created_at DESC);
 CREATE INDEX feedback_org_status_created_idx ON feedback_items (organization_id, status, created_at DESC);
 CREATE INDEX feedback_submitter_idx ON feedback_items (submitted_by, created_at DESC);
+
+CREATE TABLE feedback_comments (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  feedback_id     uuid NOT NULL,
+  author_user_id  uuid NOT NULL,
+  body            text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT feedback_comments_item_fk   FOREIGN KEY (organization_id, feedback_id)    REFERENCES feedback_items (organization_id, id) ON DELETE CASCADE,
+  CONSTRAINT feedback_comments_author_fk FOREIGN KEY (organization_id, author_user_id) REFERENCES users (organization_id, id)
+);
+CREATE INDEX feedback_comments_feedback_id_created_at_id_idx ON feedback_comments (feedback_id, created_at, id);
 
 CREATE TABLE notifications (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1465,6 +1484,7 @@ erDiagram
   users ||--o{ otp_challenges : has
   users ||--o{ notifications : receives
   users ||--o{ feedback_items : submits
+  feedback_items ||--o{ feedback_comments : has
   departments ||--o{ employees : contains
   departments o|--o| employees : "headed by"
   designations ||--o{ employees : labels
