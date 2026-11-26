@@ -111,6 +111,12 @@ enum SubmissionReviewStatus {
   not_required
 }
 
+enum SubTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
 enum FeedbackKind {
   issue
   suggestion
@@ -188,6 +194,7 @@ model User {
   teamsCreated               Team[]                       @relation("TeamCreator")
   teamMembersAdded           TeamMember[]                 @relation("TeamMemberAddedBy")
   tasksCreated               Task[]                       @relation("TaskCreator")
+  subTasksCreated            SubTask[]                    @relation("SubTaskCreator")
   taskSubmissionsMade        TaskSubmission[]             @relation("TaskSubmissionSubmitter")
   taskSubmissionsReviewed    TaskSubmission[]             @relation("TaskSubmissionReviewer")
   taskComments               TaskComment[]                @relation("TaskCommentAuthor")
@@ -594,12 +601,33 @@ model Task {
 
   assignments TaskAssignment[]
   comments    TaskComment[]
+  subTasks    SubTask[]
 
   @@unique([organizationId, id])
   @@index([organizationId, departmentId, status, dueDate])
   @@index([teamId])
   @@index([createdBy])
   @@map("tasks")
+}
+
+model SubTask {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  taskId         String        @map("task_id") @db.Uuid
+  createdBy      String        @map("created_by") @db.Uuid
+  title          String        @db.Text
+  description    String?       @db.Text
+  status         SubTaskStatus @default(PENDING)
+  completedAt    DateTime?     @map("completed_at") @db.Timestamptz()
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  task    Task @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Cascade)
+  creator User @relation("SubTaskCreator", fields: [organizationId, createdBy], references: [organizationId, id])
+
+  @@index([taskId, createdAt, id])
+  @@index([organizationId, taskId, status])
+  @@map("sub_tasks")
 }
 
 model TaskAssignment {
