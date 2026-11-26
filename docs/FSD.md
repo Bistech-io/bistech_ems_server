@@ -325,9 +325,12 @@ No `DELETE /employees/{id}`.
 | GET | /notifications | Session (cursor; `unread=true`; UI polls 30 to 60 s) |
 | GET | /notifications/unread-count | Session |
 | PATCH | /notifications/{id}/read, POST /notifications/read-all | Session |
-| POST | /feedback | feedback.submit (Idempotency-Key) |
-| GET | /feedback, /feedback/{id} | feedback.read (own for all; all for Super Admin) |
+| POST | /feedback | feedback.submit (Idempotency-Key; `isNotice: true` restricted to Super Admin, HR Manager, Dept Head, or `feedback.manage:org`) |
+| GET | /feedback, /feedback/{id} | feedback.read (`?isNotice=true\|false`, category, kind, status, `commentCount`) |
 | PATCH | /feedback/{id} | feedback.manage (status, resolutionNote) |
+| DELETE | /feedback/{id} | creator, Super Admin, HR Manager, or `feedback.manage:org` |
+| GET, POST | /feedback/{id}/comments | feedback.read / feedback.submit (board sticky-note comments) |
+| PATCH, DELETE | /feedback/{id}/comments/{commentId} | author or feedback moderator (`feedback.manage:org`) |
 | GET | /dashboard/me | dashboard.read (own) |
 | GET | /dashboard/team | dashboard.read (managed) |
 | GET | /dashboard/hr | dashboard.read (org) |
@@ -429,7 +432,8 @@ Counts filtered by caller scope; "today" uses org timezone; one shared implement
 | task_submissions | id, organization_id, assignment_id, version, note, links JSONB, submitted_by, submitted_at, review_status, reviewed_by, reviewed_at, review_note | unique (assignment_id, version); one pending per assignment; CHECK reviewed_by <> submitted_by; links <= 5 URLs |
 | task_comments | id, organization_id, task_id, author_user_id, body, created_at | body 1 to 2000; immutable |
 | task_status_events | id, organization_id, assignment_id, from_status, to_status, actor_user_id, created_at | append-only (trigger) |
-| feedback_items | id, organization_id, submitted_by, kind, category, subject, body, status, resolution_note, handled_by, handled_at | subject 5 to 150; body 10 to 4000 |
+| feedback_items | id, organization_id, submitted_by, is_notice, kind, category, subject, body, status, resolution_note, handled_by, handled_at | subject 5 to 150; body 10 to 4000; `is_notice` default false |
+| feedback_comments | id, organization_id, feedback_id, author_user_id, body, created_at, updated_at | FK to `feedback_items (organization_id, id)` ON DELETE CASCADE; body 1 to 2000 |
 | notifications | id, organization_id, user_id, type, title, body, payload, dedupe_key, read_at | unique (user_id, dedupe_key) |
 | audit_logs | id, organization_id, actor_user_id, action, entity_type, entity_id, metadata, ip_address, user_agent, request_id | append-only; INSERT+SELECT only; entity_id polymorphic |
 | idempotency_keys | organization_id, user_id, key, request_hash, response_status, response_body, expires_at | replay on same key+body |
@@ -437,7 +441,7 @@ Counts filtered by caller scope; "today" uses org timezone; one shared implement
 ## 9. Indexes (confirm with EXPLAIN ANALYZE before adding more)
 
 High: users (org, lower(email)) unique; employees (org, employment_status); employees (org, department_id, employment_status); employees (org, lower(last_name), lower(first_name)); attendance (employee_id, work_date) unique; attendance (org, work_date, status); task_assignments (employee_id, status); task_assignments (task_id); tasks (org, department_id, status, due_date); task_submissions (org, submitted_at) partial on pending; team_members (employee_id) partial active; notifications (user_id, created_at DESC) + partial unread.
-Medium: tasks (team_id) and (created_by); task_comments (task_id, created_at); feedback_items (org, status, created_at DESC); audit_logs (org, created_at DESC) and (org, entity_type, entity_id, created_at DESC).
+Medium: tasks (team_id) and (created_by); task_comments (task_id, created_at); feedback_items (org, is_notice, created_at DESC); feedback_items (org, status, created_at DESC); feedback_comments (feedback_id, created_at, id); audit_logs (org, created_at DESC) and (org, entity_type, entity_id, created_at DESC).
 ILIKE `'%x%'` is not served; add pg_trgm only if slow.
 
 ## 10. Transactions and concurrency
