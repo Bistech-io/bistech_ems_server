@@ -31,6 +31,11 @@ export interface MonthlyAttendanceSummaryDto {
   attendanceRatePercent: number;
 }
 
+export interface AttendanceNetworkStatusDto {
+  isRestricted: boolean;
+  isAllowed: boolean;
+}
+
 export interface AttendanceBoardResponseDto {
   timezone: string;
   workStart: string;
@@ -38,6 +43,7 @@ export interface AttendanceBoardResponseDto {
   workEnd: string;
   from: string;
   to: string;
+  networkStatus?: AttendanceNetworkStatusDto;
   today: TodayAttendanceDto;
   summary: MonthlyAttendanceSummaryDto;
   records: AttendanceRecordDto[];

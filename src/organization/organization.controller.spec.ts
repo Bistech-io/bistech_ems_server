@@ -16,9 +16,14 @@ describe('OrganizationController', () => {
     timezone: 'Asia/Dhaka',
     name: 'BisTech',
     slug: 'bistech',
+    allowedOfficeIps: [],
+    ipRestrictionEnabled: false,
+    currentIp: '203.0.113.10',
   };
 
   const mockReq = {
+    headers: { 'x-forwarded-for': '203.0.113.10' },
+    ip: '203.0.113.10',
     user: {
       userId: 'user-1',
       organizationId: 'org-1',
@@ -42,7 +47,11 @@ describe('OrganizationController', () => {
     it('returns organization settings envelope', async () => {
       const response = await controller.getSettings(mockReq);
 
-      expect(mockService.getSettings).toHaveBeenCalledWith('org-1');
+      expect(mockService.getSettings).toHaveBeenCalledWith(
+        'org-1',
+        mockReq.user,
+        '203.0.113.10',
+      );
       expect(response).toEqual({
         success: true,
         message: 'Organization settings retrieved',
@@ -76,6 +85,7 @@ describe('OrganizationController', () => {
           workEnd: '17:30',
         },
         mockReq.user,
+        '203.0.113.10',
       );
       expect(response).toEqual({
         success: true,
@@ -114,6 +124,7 @@ describe('OrganizationController', () => {
           timezone: 'Asia/Dhaka',
         },
         mockReq.user,
+        '203.0.113.10',
       );
       expect(response).toEqual({
         success: true,
@@ -121,6 +132,45 @@ describe('OrganizationController', () => {
         data: updatedData,
         meta: null,
       });
+    });
+
+    it('validates and deduplicates allowedOfficeIps entries', async () => {
+      const updatedData = {
+        ...mockSettingsData,
+        allowedOfficeIps: ['203.0.113.10', '103.45.20.0/24'],
+        ipRestrictionEnabled: true,
+      };
+      mockService.updateSettings.mockResolvedValue(updatedData);
+
+      const response = await controller.updateSettings(
+        {
+          allowedOfficeIps: [' 203.0.113.10 ', '203.0.113.10', '103.45.20.0/24'],
+        },
+        mockReq,
+      );
+
+      expect(mockService.updateSettings).toHaveBeenCalledWith(
+        'org-1',
+        {
+          allowedOfficeIps: ['203.0.113.10', '103.45.20.0/24'],
+        },
+        mockReq.user,
+        '203.0.113.10',
+      );
+      expect(response.data.allowedOfficeIps).toEqual(['203.0.113.10', '103.45.20.0/24']);
+    });
+
+    it('throws BadRequestException on invalid office IP entry', async () => {
+      await expect(
+        controller.updateSettings(
+          {
+            allowedOfficeIps: ['999.999.1.1'],
+          },
+          mockReq,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockService.updateSettings).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException on invalid timezone', async () => {

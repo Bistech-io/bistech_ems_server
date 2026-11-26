@@ -1,6 +1,30 @@
 import { z } from 'zod';
+import { isValidIpOrCidr, normalizeIpOrCidr } from '../../common/utils/ip.util.js';
 
 const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const allowedOfficeIpsSchema = z
+  .array(
+    z
+      .string()
+      .trim()
+      .min(1, 'IP address cannot be empty')
+      .max(64, 'IP address or CIDR entry is too long')
+      .refine(
+        (val) => isValidIpOrCidr(val),
+        'Each office IP must be a valid IPv4, IPv6, or CIDR address (e.g. 203.0.113.10 or 203.0.113.0/24)',
+      ),
+  )
+  .max(50, 'Cannot configure more than 50 office IP addresses')
+  .transform((ips) =>
+    Array.from(
+      new Set(
+        ips
+          .map((ip) => normalizeIpOrCidr(ip))
+          .filter((ip): ip is string => ip !== null),
+      ),
+    ),
+  );
 
 export const updateOrganizationSettingsSchema = z
   .object({
@@ -46,6 +70,7 @@ export const updateOrganizationSettingsSchema = z
         'weekendDays cannot contain duplicates',
       )
       .optional(),
+    allowedOfficeIps: allowedOfficeIpsSchema.optional(),
   })
   .strict();
 

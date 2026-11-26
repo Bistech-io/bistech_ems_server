@@ -7,6 +7,11 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const expressApp = app.getHttpAdapter().getInstance();
+  if (typeof expressApp?.set === 'function') {
+    expressApp.set('trust proxy', 1);
+  }
+
   app.use(cookieParser());
   app.setGlobalPrefix('api/v1', { exclude: ['/'] });
   app.useGlobalFilters(new HttpExceptionFilter());

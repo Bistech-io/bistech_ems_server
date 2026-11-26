@@ -14,6 +14,7 @@ import {
 import type { Request } from 'express';
 import { z } from 'zod';
 import { AuthGuard } from '../auth/auth.guard.js';
+import { extractClientIp } from '../common/utils/ip.util.js';
 import { AttendanceService } from './attendance.service.js';
 import {
   attendanceListQuerySchema,
@@ -46,10 +47,13 @@ export class AttendanceController {
     }
 
     const caller = req.user!;
+    const clientIp = extractClientIp(req);
     const record = await this.attendanceService.checkIn(
       caller.organizationId,
       caller.userId,
       parseResult.data,
+      new Date(),
+      clientIp,
     );
 
     return {
@@ -76,10 +80,13 @@ export class AttendanceController {
     }
 
     const caller = req.user!;
+    const clientIp = extractClientIp(req);
     const record = await this.attendanceService.checkOut(
       caller.organizationId,
       caller.userId,
       parseResult.data,
+      new Date(),
+      clientIp,
     );
 
     return {
@@ -109,10 +116,13 @@ export class AttendanceController {
     }
 
     const caller = req.user!;
+    const clientIp = extractClientIp(req);
     const board = await this.attendanceService.getMyAttendanceBoard(
       caller.organizationId,
       caller.userId,
       parseResult.data,
+      new Date(),
+      clientIp,
     );
 
     return {

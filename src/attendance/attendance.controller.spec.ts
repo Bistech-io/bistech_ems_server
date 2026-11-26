@@ -32,11 +32,14 @@ describe('AttendanceController Check-out (HTTP)', () => {
     note: string | null;
   } | null;
 
+  let allowedOfficeIps: string[];
+
   beforeEach(async () => {
     storedTodayRow = null;
+    allowedOfficeIps = [];
 
     const repoMock = {
-      findEmployeeContextByUserId: vi.fn().mockResolvedValue({
+      findEmployeeContextByUserId: vi.fn(async () => ({
         organizationId: ORG_ID,
         timezone: 'Asia/Dhaka',
         settings: {
@@ -45,11 +48,12 @@ describe('AttendanceController Check-out (HTTP)', () => {
           workEnd: '18:30',
           weekendDays: [5, 6],
         },
+        allowedOfficeIps,
         employeeId: EMP_ID,
         employmentStatus: 'active',
         joiningDate: new Date('2026-11-01T00:00:00Z'),
         exitDate: null,
-      }),
+      })),
       findHolidayDates: vi.fn().mockResolvedValue([]),
       findRecordsInRange: vi.fn(async () => (storedTodayRow ? [storedTodayRow] : [])),
       findRecordByDate: vi.fn(async () => storedTodayRow),
@@ -155,5 +159,49 @@ describe('AttendanceController Check-out (HTTP)', () => {
       .get('/api/v1/attendance/me')
       .expect(200);
     expect(boardRes.body.data.today.checkOutAt).toBe(checkOutRes.body.data.checkOutAt);
+  });
+
+  it('enforces office IP allowlist on check-in, check-out, and /attendance/me networkStatus', async () => {
+    allowedOfficeIps = ['203.0.113.42'];
+
+    // Outside office IP -> /attendance/me reports restricted & not allowed
+    const outsideBoard = await request(app.getHttpServer())
+      .get('/api/v1/attendance/me')
+      .set('x-forwarded-for', '198.51.100.77')
+      .expect(200);
+    expect(outsideBoard.body.data.networkStatus).toEqual({
+      isRestricted: true,
+      isAllowed: false,
+    });
+
+    // Outside office IP -> check-in rejected with 403 OUTSIDE_OFFICE_NETWORK
+    const blockedCheckIn = await request(app.getHttpServer())
+      .post('/api/v1/attendance/check-in')
+      .set('x-forwarded-for', '198.51.100.77')
+      .send({})
+      .expect(403);
+    expect(blockedCheckIn.body.error.code).toBe('OUTSIDE_OFFICE_NETWORK');
+
+    // Inside office IP -> check-in succeeds
+    await request(app.getHttpServer())
+      .post('/api/v1/attendance/check-in')
+      .set('x-forwarded-for', '203.0.113.42')
+      .send({})
+      .expect(201);
+
+    // Outside office IP -> check-out rejected with 403 OUTSIDE_OFFICE_NETWORK
+    const blockedCheckOut = await request(app.getHttpServer())
+      .post('/api/v1/attendance/check-out')
+      .set('x-forwarded-for', '198.51.100.77')
+      .send({})
+      .expect(403);
+    expect(blockedCheckOut.body.error.code).toBe('OUTSIDE_OFFICE_NETWORK');
+
+    // Inside office IP -> check-out succeeds
+    await request(app.getHttpServer())
+      .post('/api/v1/attendance/check-out')
+      .set('x-forwarded-for', '203.0.113.42')
+      .send({})
+      .expect(200);
   });
 });

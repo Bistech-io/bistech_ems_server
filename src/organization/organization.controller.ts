@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../auth/auth.guard.js';
+import { extractClientIp } from '../common/utils/ip.util.js';
 import { OrganizationService } from './organization.service.js';
 import { updateOrganizationSettingsSchema } from './dto/update-settings.dto.js';
 
@@ -19,8 +20,13 @@ export class OrganizationController {
 
   @Get('settings')
   async getSettings(@Req() req: Request) {
-    const orgId = req.user!.organizationId;
-    const data = await this.organizationService.getSettings(orgId);
+    const caller = req.user!;
+    const clientIp = extractClientIp(req);
+    const data = await this.organizationService.getSettings(
+      caller.organizationId,
+      caller,
+      clientIp,
+    );
     return {
       success: true,
       message: 'Organization settings retrieved',
@@ -44,10 +50,12 @@ export class OrganizationController {
     }
 
     const caller = req.user!;
+    const clientIp = extractClientIp(req);
     const data = await this.organizationService.updateSettings(
       caller.organizationId,
       parseResult.data,
       caller,
+      clientIp,
     );
 
     return {
