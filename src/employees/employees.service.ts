@@ -18,6 +18,7 @@ import {
 } from '../auth/role.utils.js';
 import { hasPermission } from '../auth/permission.utils.js';
 import { CreateEmployeeDto } from './dto/create-employee.dto.js';
+import type { UpdateEmployeeAccountStatusDto } from './dto/account-status.dto.js';
 import type { UpdateEmployeeDto } from './dto/update-employee.dto.js';
 import type { AuthenticatedUser } from '../auth/auth.guard.js';
 
@@ -677,6 +678,106 @@ export class EmployeesService {
           metadata: {
             departmentChanged: nextDepartmentId !== existing.departmentId,
             designationChanged: nextDesignationId !== existing.designationId,
+          },
+        },
+      });
+    });
+
+    return this.getEmployeeById(id, caller);
+  }
+
+  async updateEmployeeAccountStatus(
+    id: string,
+    dto: UpdateEmployeeAccountStatusDto,
+    caller: AuthenticatedUser,
+  ) {
+    const isSuperAdmin = caller.roles.includes('super_admin');
+    const isHrOrAdmin =
+      isSuperAdmin || caller.roles.includes('hr_manager');
+
+    if (!isHrOrAdmin) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Only HR Managers or Super Admins can freeze or unfreeze employee accounts',
+      });
+    }
+
+    const orgId = caller.organizationId;
+
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.employee.findUnique({
+        where: { organizationId_id: { organizationId: orgId, id } },
+        select: {
+          id: true,
+          userId: true,
+          user: {
+            select: {
+              id: true,
+              accountStatus: true,
+              userRoles: {
+                include: { role: { select: { name: true } } },
+              },
+            },
+          },
+        },
+      });
+
+      if (!existing) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message: 'Employee record not found',
+        });
+      }
+
+      if (dto.frozen && existing.userId === caller.userId) {
+        throw new BadRequestException({
+          code: 'SELF_FREEZE_NOT_ALLOWED',
+          message: 'You cannot freeze your own account',
+        });
+      }
+
+      const targetIsSuperAdmin = existing.user.userRoles.some(
+        (ur) => ur.role.name === 'super_admin',
+      );
+      if (targetIsSuperAdmin && !isSuperAdmin) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: 'Only Super Admins can change a Super Admin account status',
+        });
+      }
+
+      const nextAccountStatus = dto.frozen ? 'suspended' : 'active';
+
+      await tx.user.update({
+        where: { id: existing.userId },
+        data: { accountStatus: nextAccountStatus },
+      });
+
+      if (dto.frozen) {
+        await tx.userSession.updateMany({
+          where: {
+            organizationId: orgId,
+            userId: existing.userId,
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: new Date(),
+            revokedReason: 'admin_revoke',
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          actorUserId: caller.userId,
+          action: dto.frozen ? 'employee.account_frozen' : 'employee.account_unfrozen',
+          entityType: 'employee',
+          entityId: id,
+          metadata: {
+            targetUserId: existing.userId,
+            accountStatus: nextAccountStatus,
+            reason: dto.reason ?? null,
           },
         },
       });
